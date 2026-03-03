@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import CallbackClient from "./CallbackClient";
+import CallbackClient from "./CallBackClient";
 
 export const dynamic = "force-dynamic";
 
