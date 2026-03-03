@@ -1,137 +1,88 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<string>("");
-  const [phase, setPhase] = useState<"idle" | "sending" | "sent" | "error">(
-    "idle"
-  );
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<"idle" | "signedup" | "error">("idle");
+  const [error, setError] = useState("");
 
-  // Hard guard against accidental double submits (even if React rerenders)
-  const inFlightRef = useRef(false);
+  const signUp = async () => {
+    setLoading(true);
+    setError("");
+    setStatus("idle");
 
-  // Optional: if user edits email after "sent", reset the button back
-  useEffect(() => {
-    if (phase === "sent") setPhase("idle");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [email]);
-
-  const isValidEmail = (value: string) =>
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-
-  async function sendMagicLink() {
-    const cleanEmail = email.trim();
-
-    if (!isValidEmail(cleanEmail)) {
-      setPhase("error");
-      setStatus("Enter a valid email.");
-      return;
-    }
-
-    // Block duplicate calls (click spam, Enter spam, slow network)
-    if (inFlightRef.current || phase === "sending" || phase === "sent") return;
-
-    inFlightRef.current = true;
-    setPhase("sending");
-    setStatus("");
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email: cleanEmail,
-      options: {
-        // Important: works on Vercel AND localhost
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-
-    inFlightRef.current = false;
+    const { error } = await supabase.auth.signUp({ email, password });
 
     if (error) {
-      setPhase("error");
+      setError(error.message);
+      setStatus("error");
+    } else {
+      setStatus("signedup");
+    }
+    setLoading(false);
+  };
 
-      // Make the rate-limit error actionable
-      const msg = (error.message || "").toLowerCase();
-      if (msg.includes("rate limit") || msg.includes("too many")) {
-        setStatus(
-          "Rate limit reached. Wait 10–15 minutes, then try again (and don’t click twice)."
-        );
-      } else {
-        setStatus(error.message || "Something went wrong.");
-      }
+  const signIn = async () => {
+    setLoading(true);
+    setError("");
+    setStatus("idle");
 
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      setError(error.message);
+      setStatus("error");
+      setLoading(false);
       return;
     }
 
-    setPhase("sent");
-    setStatus("Link sent. Check your email.");
-  }
+    router.push("/calendar");
+  };
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault(); // prevents reload + duplicate submits
-    void sendMagicLink();
-  }
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    // Prevent Enter from firing multiple submits while sending/sent
-    if (e.key === "Enter") {
-      e.preventDefault();
-      void sendMagicLink();
-    }
-  }
-
-  const buttonLabel =
-    phase === "sending"
-      ? "Sending..."
-      : phase === "sent"
-      ? "Link sent"
-      : "Send magic link";
-
-  const buttonDisabled =
-    phase === "sending" || phase === "sent" || !email.trim();
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") signIn();
+  };
 
   return (
-    <main style={{ padding: 24, maxWidth: 420 }}>
-      <h1 style={{ marginBottom: 12 }}>Login</h1>
+    <div style={{ padding: 24, maxWidth: 420 }}>
+      <h2>Login</h2>
 
-      <form onSubmit={onSubmit}>
-        <label style={{ display: "block", marginBottom: 8 }}>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="you@example.com"
-            autoComplete="email"
-            style={{
-              display: "block",
-              width: "100%",
-              padding: "10px 12px",
-              marginTop: 6,
-            }}
-          />
-        </label>
+      <input
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Email"
+        type="email"
+        style={{ width: "100%", marginBottom: 10 }}
+      />
 
-        <button
-          type="submit"
-          disabled={buttonDisabled}
-          style={{
-            padding: "10px 12px",
-            width: "100%",
-            cursor: buttonDisabled ? "not-allowed" : "pointer",
-          }}
-        >
-          {buttonLabel}
-        </button>
+      <input
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Password"
+        type="password"
+        onKeyDown={onKeyDown}
+        style={{ width: "100%", marginBottom: 10 }}
+      />
 
-        {status ? (
-          <p style={{ marginTop: 12, color: phase === "error" ? "crimson" : "" }}>
-            {status}
-          </p>
-        ) : null}
-      </form>
-    </main>
+      <button onClick={signIn} disabled={loading} style={{ width: "100%", marginBottom: 10 }}>
+        Sign in
+      </button>
+
+      <button onClick={signUp} disabled={loading} style={{ width: "100%" }}>
+        Sign up
+      </button>
+
+      {status === "signedup" && (
+        <p style={{ marginTop: 10 }}>Account created. If email confirmation is on, confirm via email once.</p>
+      )}
+
+      {status === "error" && <p style={{ color: "red", marginTop: 10 }}>{error}</p>}
+    </div>
   );
 }
