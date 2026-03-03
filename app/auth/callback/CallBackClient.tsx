@@ -10,6 +10,8 @@ function CallbackInner() {
 
   useEffect(() => {
     const run = async () => {
+      // For email+password signups (or OTP/magic link if you ever re-enable),
+      // Supabase sends ?code=... which must be exchanged for a session.
       const code = searchParams.get("code");
 
       if (code) {
@@ -21,6 +23,7 @@ function CallbackInner() {
         }
       }
 
+      // After session exists (or no code needed), go to calendar.
       router.replace("/calendar");
     };
 
