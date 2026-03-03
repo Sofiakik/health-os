@@ -8,13 +8,18 @@ export default function AuthCallbackPage() {
   const router = useRouter();
 
   useEffect(() => {
-    async function handleAuth() {
-      await supabase.auth.getSession();
-      router.push("/calendar");
-    }
+    const run = async () => {
+      // This reads the ?code=... from URL and exchanges it for a session
+      const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+      if (error) {
+        router.replace("/login?error=callback");
+        return;
+      }
+      router.replace("/calendar");
+    };
 
-    handleAuth();
+    run();
   }, [router]);
 
-  return <p>Signing you in...</p>;
+  return <p>Signing you in…</p>;
 }

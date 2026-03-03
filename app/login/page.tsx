@@ -1,46 +1,137 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<string>("");
+  const [phase, setPhase] = useState<"idle" | "sending" | "sent" | "error">(
+    "idle"
+  );
 
-  async function handleLogin() {
-    setMessage("");
+  // Hard guard against accidental double submits (even if React rerenders)
+  const inFlightRef = useRef(false);
 
-    // ключ: редиректим обратно на тот домен, откуда открыта страница (/login)
-    const redirectTo = `${window.location.origin}/auth/callback`;
+  // Optional: if user edits email after "sent", reset the button back
+  useEffect(() => {
+    if (phase === "sent") setPhase("idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email]);
+
+  const isValidEmail = (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+  async function sendMagicLink() {
+    const cleanEmail = email.trim();
+
+    if (!isValidEmail(cleanEmail)) {
+      setPhase("error");
+      setStatus("Enter a valid email.");
+      return;
+    }
+
+    // Block duplicate calls (click spam, Enter spam, slow network)
+    if (inFlightRef.current || phase === "sending" || phase === "sent") return;
+
+    inFlightRef.current = true;
+    setPhase("sending");
+    setStatus("");
 
     const { error } = await supabase.auth.signInWithOtp({
-      email,
+      email: cleanEmail,
       options: {
-        emailRedirectTo: redirectTo,
+        // Important: works on Vercel AND localhost
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
 
-    if (error) setMessage("Error: " + error.message);
-    else setMessage("Check your email for the login link.");
+    inFlightRef.current = false;
+
+    if (error) {
+      setPhase("error");
+
+      // Make the rate-limit error actionable
+      const msg = (error.message || "").toLowerCase();
+      if (msg.includes("rate limit") || msg.includes("too many")) {
+        setStatus(
+          "Rate limit reached. Wait 10–15 minutes, then try again (and don’t click twice)."
+        );
+      } else {
+        setStatus(error.message || "Something went wrong.");
+      }
+
+      return;
+    }
+
+    setPhase("sent");
+    setStatus("Link sent. Check your email.");
   }
 
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault(); // prevents reload + duplicate submits
+    void sendMagicLink();
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    // Prevent Enter from firing multiple submits while sending/sent
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void sendMagicLink();
+    }
+  }
+
+  const buttonLabel =
+    phase === "sending"
+      ? "Sending..."
+      : phase === "sent"
+      ? "Link sent"
+      : "Send magic link";
+
+  const buttonDisabled =
+    phase === "sending" || phase === "sent" || !email.trim();
+
   return (
-    <main style={{ padding: 24, maxWidth: 520 }}>
-      <h1>Login</h1>
+    <main style={{ padding: 24, maxWidth: 420 }}>
+      <h1 style={{ marginBottom: 12 }}>Login</h1>
 
-      <input
-        type="email"
-        placeholder="your@email.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        style={{ padding: 10, width: "100%", marginTop: 10 }}
-      />
+      <form onSubmit={onSubmit}>
+        <label style={{ display: "block", marginBottom: 8 }}>
+          Email
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="you@example.com"
+            autoComplete="email"
+            style={{
+              display: "block",
+              width: "100%",
+              padding: "10px 12px",
+              marginTop: 6,
+            }}
+          />
+        </label>
 
-      <button onClick={handleLogin} style={{ padding: 10, marginTop: 12, width: "100%" }}>
-        Send magic link
-      </button>
+        <button
+          type="submit"
+          disabled={buttonDisabled}
+          style={{
+            padding: "10px 12px",
+            width: "100%",
+            cursor: buttonDisabled ? "not-allowed" : "pointer",
+          }}
+        >
+          {buttonLabel}
+        </button>
 
-      {message && <p style={{ marginTop: 12 }}>{message}</p>}
+        {status ? (
+          <p style={{ marginTop: 12, color: phase === "error" ? "crimson" : "" }}>
+            {status}
+          </p>
+        ) : null}
+      </form>
     </main>
   );
 }
