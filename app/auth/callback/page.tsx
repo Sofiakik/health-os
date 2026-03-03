@@ -1,25 +1,32 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
+  const params = useSearchParams();
 
   useEffect(() => {
     const run = async () => {
-      // This reads the ?code=... from URL and exchanges it for a session
-      const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-      if (error) {
-        router.replace("/login?error=callback");
+      const code = params.get("code");
+      if (!code) {
+        router.replace("/login?error=missing_code");
         return;
       }
+
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) {
+        router.replace("/login?error=exchange_failed");
+        return;
+      }
+
       router.replace("/calendar");
     };
 
     run();
-  }, [router]);
+  }, [params, router]);
 
   return <p>Signing you in…</p>;
 }

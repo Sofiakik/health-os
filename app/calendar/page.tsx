@@ -6,38 +6,36 @@ import { supabase } from "@/lib/supabaseClient";
 
 export default function CalendarPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+
     const init = async () => {
       const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
 
       if (!data.session) {
         router.replace("/login");
         return;
       }
 
-      setLoading(false);
+      setReady(true);
     };
 
     init();
 
-    // also react to sign-out/sign-in changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) router.replace("/login");
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, [router]);
 
-  if (loading) return <p>Loading…</p>;
+  if (!ready) return <p>Loading…</p>;
 
-  return (
-    <div style={{ padding: 24 }}>
-      <h1>Calendar</h1>
-      <p>It works ✅</p>
-    </div>
-  );
+  return <div style={{ padding: 24 }}>Calendar ✅</div>;
 }
