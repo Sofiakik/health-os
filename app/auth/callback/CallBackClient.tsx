@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function CallbackClient() {
+function CallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
   useEffect(() => {
     const run = async () => {
-      // Supabase magic/OTP links typically include ?code=...
       const code = searchParams.get("code");
 
       if (code) {
@@ -22,7 +21,6 @@ export default function CallbackClient() {
         }
       }
 
-      // If session exists (or after exchanging code), go to calendar
       router.replace("/calendar");
     };
 
@@ -30,4 +28,12 @@ export default function CallbackClient() {
   }, [router, searchParams]);
 
   return <div style={{ padding: 24 }}>Finishing login…</div>;
+}
+
+export default function CallBackClient() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+      <CallbackInner />
+    </Suspense>
+  );
 }
