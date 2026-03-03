@@ -4,15 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-type NoteType = "Meal" | "Symptom" | "Condition";
-type MealType = "Breakfast" | "Lunch" | "Dinner" | "Snack";
+type NoteType = "meal" | "symptom" | "condition";
+type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 type Entry = {
   id: string;
   date: string;
   note: string | null;
-  note_type: string | null;
-  meal_type: string | null;
+  note_type: NoteType | null;
+  meal_type: MealType | null;
   image_url: string | null;
   created_at: string;
 };
@@ -27,6 +27,19 @@ const today = () => {
   return `${y}-${m}-${day}`;
 };
 
+const labelNoteType: Record<NoteType, string> = {
+  meal: "Meal",
+  symptom: "Symptom",
+  condition: "Condition",
+};
+
+const labelMealType: Record<MealType, string> = {
+  breakfast: "Breakfast",
+  lunch: "Lunch",
+  dinner: "Dinner",
+  snack: "Snack",
+};
+
 export default function CalendarPage() {
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -37,15 +50,14 @@ export default function CalendarPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [noteType, setNoteType] = useState<NoteType>("Meal");
-  const [mealType, setMealType] = useState<MealType>("Breakfast");
+  const [noteType, setNoteType] = useState<NoteType>("meal");
+  const [mealType, setMealType] = useState<MealType>("breakfast");
   const [note, setNote] = useState("");
   const [file, setFile] = useState<File | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Auth guard + keep user id in state
   useEffect(() => {
     let alive = true;
 
@@ -96,7 +108,6 @@ export default function CalendarPage() {
     setLoading(false);
   };
 
-  // Load entries when auth + date changes
   useEffect(() => {
     if (!userId) return;
     fetchEntries(userId, selectedDate);
@@ -133,8 +144,8 @@ export default function CalendarPage() {
         user_id: userId,
         date: selectedDate,
         note: hasText ? note.trim() : null,
-        note_type: noteType,
-        meal_type: noteType === "Meal" ? mealType : null,
+        note_type: noteType, // lowercase enum value
+        meal_type: noteType === "meal" ? mealType : null, // lowercase enum value
         image_url: imageUrl,
       };
 
@@ -206,20 +217,20 @@ export default function CalendarPage() {
         <label style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
           <span style={{ fontSize: 12, opacity: 0.7 }}>Type</span>
           <select value={noteType} onChange={(e) => setNoteType(e.target.value as NoteType)}>
-            <option value="Meal">Meal</option>
-            <option value="Symptom">Symptom</option>
-            <option value="Condition">Condition</option>
+            <option value="meal">{labelNoteType.meal}</option>
+            <option value="symptom">{labelNoteType.symptom}</option>
+            <option value="condition">{labelNoteType.condition}</option>
           </select>
         </label>
 
-        {noteType === "Meal" && (
+        {noteType === "meal" && (
           <label style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
             <span style={{ fontSize: 12, opacity: 0.7 }}>Meal time</span>
             <select value={mealType} onChange={(e) => setMealType(e.target.value as MealType)}>
-              <option value="Breakfast">Breakfast</option>
-              <option value="Lunch">Lunch</option>
-              <option value="Dinner">Dinner</option>
-              <option value="Snack">Snack</option>
+              <option value="breakfast">{labelMealType.breakfast}</option>
+              <option value="lunch">{labelMealType.lunch}</option>
+              <option value="dinner">{labelMealType.dinner}</option>
+              <option value="snack">{labelMealType.snack}</option>
             </select>
           </label>
         )}
@@ -236,7 +247,11 @@ export default function CalendarPage() {
         />
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
           <button onClick={saveEntry} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </button>
@@ -257,18 +272,16 @@ export default function CalendarPage() {
           {entries.map((e) => (
             <div key={e.id} style={{ border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                <strong>{e.note_type ?? "Entry"}</strong>
-                {e.note_type === "Meal" && e.meal_type && (
-                  <span style={{ fontSize: 12, opacity: 0.7 }}>• {e.meal_type}</span>
+                <strong>{e.note_type ? labelNoteType[e.note_type] : "Entry"}</strong>
+                {e.note_type === "meal" && e.meal_type && (
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>• {labelMealType[e.meal_type]}</span>
                 )}
                 <span style={{ marginLeft: "auto", fontSize: 12, opacity: 0.6 }}>
                   {new Date(e.created_at).toLocaleString()}
                 </span>
               </div>
 
-              {e.note && (
-                <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 8 }}>{e.note}</p>
-              )}
+              {e.note && <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 8 }}>{e.note}</p>}
 
               {e.image_url && (
                 // eslint-disable-next-line @next/next/no-img-element
