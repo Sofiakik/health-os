@@ -3,21 +3,31 @@ import OpenAI from "openai";
 
 export const dynamic = "force-dynamic";
 
-// ✅ Server-only envs (NO NEXT_PUBLIC for service role / OpenAI)
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
+// Helper: returns a guaranteed string (fixes TS) or throws early
+function mustEnv(name: string, value: string | undefined): string {
+  if (!value) throw new Error(`Missing ${name}`);
+  return value;
+}
 
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+// Public-ish (ok to exist as NEXT_PUBLIC_ too)
+const SUPABASE_URL = mustEnv(
+  "SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)",
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL
+);
+
+const SUPABASE_ANON_KEY = mustEnv(
+  "SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY)",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY
+);
+
+// Server-only (NEVER NEXT_PUBLIC_)
+const SUPABASE_SERVICE_ROLE_KEY = mustEnv(
+  "SUPABASE_SERVICE_ROLE_KEY",
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+const OPENAI_API_KEY = mustEnv("OPENAI_API_KEY", process.env.OPENAI_API_KEY);
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.2";
-
-// Hard fail early (and fix TS types)
-if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
-if (!SUPABASE_ANON_KEY) throw new Error("Missing SUPABASE_ANON_KEY");
-if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-if (!OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -35,7 +45,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    // 1) Auth via Bearer token (from browser localStorage)
+    // 1) Auth via Bearer token (NOT cookies)
     const authHeader = req.headers.get("authorization") ?? "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
     if (!token) {
@@ -45,27 +55,24 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2) Validate token via Supabase Auth REST (avoids SSR cookie complexity)
+    // 2) Validate token via Supabase Auth REST
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       method: "GET",
-      headers: {
-        apikey: SUPABASE_ANON_KEY, // ✅ now guaranteed string
+      headers: new Headers({
+        apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${token}`,
-      },
+      }),
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      return Response.json(
-        { error: "Not authenticated", details: text },
-        { status: 401 }
-      );
+      const details = await res.text();
+      return Response.json({ error: "Not authenticated", details }, { status: 401 });
     }
 
     const user = (await res.json()) as { id: string };
     const userId = user.id;
 
-    // 3) Pull last 7 days by `date` column (YYYY-MM-DD)
+    // 3) Get last 7 days by `date` (YYYY-MM-DD)
     const end = new Date();
     const start = new Date();
     start.setDate(end.getDate() - 6);
@@ -90,8 +97,8 @@ export async function POST(req: Request) {
 
     const compact = (entries ?? []).map((e: any) => ({
       date: e.date,
-      note_type: e.note_type,   // meal | symptom | state
-      meal_type: e.meal_type,   // breakfast | lunch | dinner | snack (or null)
+      note_type: e.note_type, // meal | symptom | state
+      meal_type: e.meal_type, // breakfast | lunch | dinner | snack | null
       note: e.note,
       image_url: e.image_url,
       portion_grams: e.portion_grams,
@@ -123,7 +130,7 @@ export async function POST(req: Request) {
 
     const insightText = completion.choices?.[0]?.message?.content ?? "";
 
-    // 4) Save row (multiple per day allowed)
+    // 4) Save insight row
     const today = yyyyMmDd(new Date());
 
     const { error: insertError } = await supabaseAdmin.from("daily_insights").insert({
