@@ -1,5 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,6 @@ if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SE
 if (!process.env.OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
 
 const supabaseAdmin = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -23,31 +22,71 @@ function yyyyMmDd(d: Date) {
 }
 
 export async function GET() {
-  return Response.json({ ok: true, hint: "Use POST with Authorization: Bearer <access_token>" });
+  return Response.json({
+    ok: true,
+    hint: "Use POST with Authorization: Bearer <access_token>",
+  });
+}
+
+async function getUserIdFromBearer(req: Request): Promise<{ userId: string } | { error: string; status: number; debug?: any }> {
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
+
+  if (!token) {
+    return { error: "Not authenticated (missing Authorization: Bearer <token>)", status: 401 };
+  }
+
+  // 🔒 Explicit Auth REST call so apikey is ALWAYS present (avoids “No API key found” class of issues)
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    method: "GET",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+    // cache: "no-store" not needed; GET user is always dynamic anyway
+  });
+
+  const bodyText = await res.text();
+  let bodyJson: any = null;
+  try {
+    bodyJson = JSON.parse(bodyText);
+  } catch {
+    // keep as text
+  }
+
+  if (!res.ok) {
+    return {
+      error: "Not authenticated (token rejected by Supabase)",
+      status: 401,
+      debug: {
+        supabase_status: res.status,
+        supabase_body: bodyJson ?? bodyText,
+      },
+    };
+  }
+
+  const userId = bodyJson?.id;
+  if (!userId) {
+    return {
+      error: "Not authenticated (Supabase returned no user id)",
+      status: 401,
+      debug: { supabase_body: bodyJson ?? bodyText },
+    };
+  }
+
+  return { userId };
 }
 
 export async function POST(req: Request) {
   try {
     // 1) Auth via Bearer token (NOT cookies)
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-
-    if (!token) {
-      return Response.json(
-        { error: "Not authenticated (missing Authorization Bearer token)" },
-        { status: 401 }
-      );
+    const auth = await getUserIdFromBearer(req);
+    if ("error" in auth) {
+      return Response.json({ error: auth.error, debug: auth.debug }, { status: auth.status });
     }
+    const userId = auth.userId;
 
-    const { data: userData, error: userErr } = await supabaseAnon.auth.getUser(token);
-
-    if (userErr || !userData?.user) {
-      return Response.json({ error: "Not authenticated" }, { status: 401 });
-    }
-
-    const userId = userData.user.id;
-
-    // 2) Get last 7 days of entries by `date` column (YYYY-MM-DD)
+    // 2) Last 7 days by `date` column (YYYY-MM-DD)
     const end = new Date();
     const start = new Date();
     start.setDate(end.getDate() - 6);
@@ -72,7 +111,6 @@ export async function POST(req: Request) {
 
     const model = process.env.OPENAI_MODEL || "gpt-5.2";
 
-    // Keep prompt compact (cheaper + less brittle)
     const compact = (entries ?? []).map((e: any) => ({
       date: e.date,
       note_type: e.note_type,
@@ -108,7 +146,7 @@ export async function POST(req: Request) {
 
     const insightText = completion.choices?.[0]?.message?.content ?? "";
 
-    // 3) Save insight row (one row per run; allowed to have multiple per day)
+    // 3) Save insight row (one row per run)
     const today = yyyyMmDd(new Date());
 
     const { error: insertError } = await supabaseAdmin.from("daily_insights").insert({
