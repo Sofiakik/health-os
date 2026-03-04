@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-type NoteType = "meal" | "symptom" | "condition";
+type NoteType = "meal" | "symptom" | "state";
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 type Entry = {
@@ -30,7 +30,7 @@ const today = () => {
 const labelNoteType: Record<NoteType, string> = {
   meal: "Meal",
   symptom: "Symptom",
-  condition: "Condition",
+  state: "State",
 };
 
 const labelMealType: Record<MealType, string> = {
@@ -59,12 +59,8 @@ export default function CalendarPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    let alive = true;
-
     const init = async () => {
       const { data, error } = await supabase.auth.getSession();
-      if (!alive) return;
-
       const uid = data.session?.user?.id;
       if (error || !uid) {
         router.replace("/login");
@@ -81,10 +77,7 @@ export default function CalendarPage() {
       else setUserId(uid);
     });
 
-    return () => {
-      alive = false;
-      sub.subscription.unsubscribe();
-    };
+    return () => sub.subscription.unsubscribe();
   }, [router]);
 
   const fetchEntries = async (uid: string, date: string) => {
@@ -120,7 +113,9 @@ export default function CalendarPage() {
     const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
     const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
 
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file);
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
+      upsert: false,
+    });
     if (upErr) throw upErr;
 
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
@@ -144,8 +139,8 @@ export default function CalendarPage() {
         user_id: userId,
         date: selectedDate,
         note: hasText ? note.trim() : null,
-        note_type: noteType, // lowercase enum value
-        meal_type: noteType === "meal" ? mealType : null, // lowercase enum value
+        note_type: noteType, // must match enum (meal/symptom/state)
+        meal_type: noteType === "meal" ? mealType : null, // must be null unless meal
         image_url: imageUrl,
       };
 
@@ -207,11 +202,7 @@ export default function CalendarPage() {
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontSize: 12, opacity: 0.7 }}>Date</span>
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-          />
+          <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
         </label>
 
         <label style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
@@ -219,7 +210,7 @@ export default function CalendarPage() {
           <select value={noteType} onChange={(e) => setNoteType(e.target.value as NoteType)}>
             <option value="meal">{labelNoteType.meal}</option>
             <option value="symptom">{labelNoteType.symptom}</option>
-            <option value="condition">{labelNoteType.condition}</option>
+            <option value="state">{labelNoteType.state}</option>
           </select>
         </label>
 
@@ -247,11 +238,7 @@ export default function CalendarPage() {
         />
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
+          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           <button onClick={saveEntry} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </button>
@@ -281,7 +268,9 @@ export default function CalendarPage() {
                 </span>
               </div>
 
-              {e.note && <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 8 }}>{e.note}</p>}
+              {e.note && (
+                <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 8 }}>{e.note}</p>
+              )}
 
               {e.image_url && (
                 // eslint-disable-next-line @next/next/no-img-element
