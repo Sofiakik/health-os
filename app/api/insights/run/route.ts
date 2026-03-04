@@ -81,7 +81,7 @@ export async function POST(req: Request) {
 
     const { data: entries, error: entriesError } = await supabaseAdmin
       .from("entries")
-      .select("id, created_at, type, meal_type, note, image_url")
+      .select("id, created_at, note_type, meal_type, symptom_type, note, image_url")
       .eq("user_id", user.id)
       .gte("created_at", sevenDaysAgo.toISOString())
       .order("created_at", { ascending: true });
