@@ -24,13 +24,9 @@ function getBearerToken(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    // ✅ Auth via Authorization header (MVP, avoids SSR cookies)
-    const accessToken = getBearerToken(req);
-    if (!accessToken) {
-      return Response.json(
-        { error: "Not authenticated", hint: "Send Authorization: Bearer <access_token>" },
-        { status: 401 }
-      );
+    return Response.json({
+        gotAuthHeader: req.headers.get("authorization"),
+      });
     }
 
     const { data: userData, error: userErr } = await supabaseAnon.auth.getUser(accessToken);
