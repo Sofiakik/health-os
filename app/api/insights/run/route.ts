@@ -1,21 +1,26 @@
-import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
+import OpenAI from "openai";
 
 export const dynamic = "force-dynamic";
 
+// ✅ Server-only envs (NO NEXT_PUBLIC for service role / OpenAI)
 const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY;
 
-if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)");
-if (!SUPABASE_ANON_KEY) throw new Error("Missing SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY)");
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
-if (!process.env.OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.2";
 
-const supabaseAdmin = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Hard fail early (and fix TS types)
+if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+if (!SUPABASE_ANON_KEY) throw new Error("Missing SUPABASE_ANON_KEY");
+if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+if (!OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 function yyyyMmDd(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -28,65 +33,39 @@ export async function GET() {
   });
 }
 
-async function getUserIdFromBearer(req: Request): Promise<{ userId: string } | { error: string; status: number; debug?: any }> {
-  const authHeader = req.headers.get("authorization") || "";
-  const token = authHeader.toLowerCase().startsWith("bearer ") ? authHeader.slice(7).trim() : "";
-
-  if (!token) {
-    return { error: "Not authenticated (missing Authorization: Bearer <token>)", status: 401 };
-  }
-
-  // 🔒 Explicit Auth REST call so apikey is ALWAYS present (avoids “No API key found” class of issues)
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    method: "GET",
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${token}`,
-    },
-    // cache: "no-store" not needed; GET user is always dynamic anyway
-  });
-
-  const bodyText = await res.text();
-  let bodyJson: any = null;
-  try {
-    bodyJson = JSON.parse(bodyText);
-  } catch {
-    // keep as text
-  }
-
-  if (!res.ok) {
-    return {
-      error: "Not authenticated (token rejected by Supabase)",
-      status: 401,
-      debug: {
-        supabase_status: res.status,
-        supabase_body: bodyJson ?? bodyText,
-      },
-    };
-  }
-
-  const userId = bodyJson?.id;
-  if (!userId) {
-    return {
-      error: "Not authenticated (Supabase returned no user id)",
-      status: 401,
-      debug: { supabase_body: bodyJson ?? bodyText },
-    };
-  }
-
-  return { userId };
-}
-
 export async function POST(req: Request) {
   try {
-    // 1) Auth via Bearer token (NOT cookies)
-    const auth = await getUserIdFromBearer(req);
-    if ("error" in auth) {
-      return Response.json({ error: auth.error, debug: auth.debug }, { status: auth.status });
+    // 1) Auth via Bearer token (from browser localStorage)
+    const authHeader = req.headers.get("authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token) {
+      return Response.json(
+        { error: "Not authenticated (missing Authorization Bearer token)" },
+        { status: 401 }
+      );
     }
-    const userId = auth.userId;
 
-    // 2) Last 7 days by `date` column (YYYY-MM-DD)
+    // 2) Validate token via Supabase Auth REST (avoids SSR cookie complexity)
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: "GET",
+      headers: {
+        apikey: SUPABASE_ANON_KEY, // ✅ now guaranteed string
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return Response.json(
+        { error: "Not authenticated", details: text },
+        { status: 401 }
+      );
+    }
+
+    const user = (await res.json()) as { id: string };
+    const userId = user.id;
+
+    // 3) Pull last 7 days by `date` column (YYYY-MM-DD)
     const end = new Date();
     const start = new Date();
     start.setDate(end.getDate() - 6);
@@ -109,12 +88,10 @@ export async function POST(req: Request) {
       return Response.json({ error: entriesError.message }, { status: 500 });
     }
 
-    const model = process.env.OPENAI_MODEL || "gpt-5.2";
-
     const compact = (entries ?? []).map((e: any) => ({
       date: e.date,
-      note_type: e.note_type,
-      meal_type: e.meal_type,
+      note_type: e.note_type,   // meal | symptom | state
+      meal_type: e.meal_type,   // breakfast | lunch | dinner | snack (or null)
       note: e.note,
       image_url: e.image_url,
       portion_grams: e.portion_grams,
@@ -137,7 +114,7 @@ export async function POST(req: Request) {
     ].join("\n");
 
     const completion = await openai.chat.completions.create({
-      model,
+      model: OPENAI_MODEL,
       messages: [
         { role: "system", content: "Be concise. Be actionable. Use the required section headings." },
         { role: "user", content: prompt },
@@ -146,7 +123,7 @@ export async function POST(req: Request) {
 
     const insightText = completion.choices?.[0]?.message?.content ?? "";
 
-    // 3) Save insight row (one row per run)
+    // 4) Save row (multiple per day allowed)
     const today = yyyyMmDd(new Date());
 
     const { error: insertError } = await supabaseAdmin.from("daily_insights").insert({
@@ -154,7 +131,7 @@ export async function POST(req: Request) {
       day: today,
       window_end_at: new Date().toISOString(),
       provider: "openai",
-      model,
+      model: OPENAI_MODEL,
       insight: { text: insightText, start_date: startDate, end_date: endDate },
     });
 
