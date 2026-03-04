@@ -3,36 +3,34 @@ import OpenAI from "openai";
 
 export const dynamic = "force-dynamic";
 
-// Public URL is fine to use here (it's not a secret)
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Server-only secrets (NEVER NEXT_PUBLIC_)
+// server-only
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.2";
 
-// Admin client (bypasses RLS) — server-only
 const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
-// Public client (uses anon) — we use it only to validate the user via JWT from cookie
-const supabaseAnon = createClient(SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+const supabaseAnon = createClient(SUPABASE_URL, ANON_KEY);
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-function getAccessTokenFromCookie(cookieHeader: string | null) {
-  if (!cookieHeader) return null;
-
-  // Supabase sets: sb-access-token=... (and sb-refresh-token=...)
-  const match = cookieHeader.match(/sb-access-token=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
+function getBearerToken(req: Request) {
+  const h = req.headers.get("authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : null;
 }
 
 export async function POST(req: Request) {
   try {
-    // 1) Auth: get user from Supabase access token cookie
-    const accessToken = getAccessTokenFromCookie(req.headers.get("cookie"));
+    // ✅ Auth via Authorization header (MVP, avoids SSR cookies)
+    const accessToken = getBearerToken(req);
     if (!accessToken) {
-      return Response.json({ error: "Not authenticated (no access token cookie)" }, { status: 401 });
+      return Response.json(
+        { error: "Not authenticated", hint: "Send Authorization: Bearer <access_token>" },
+        { status: 401 }
+      );
     }
 
     const { data: userData, error: userErr } = await supabaseAnon.auth.getUser(accessToken);
@@ -41,15 +39,13 @@ export async function POST(req: Request) {
     }
     const userId = userData.user.id;
 
-    // 2) Load entries: only columns that EXIST in your table
+    // last 7 days by created_at
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const { data: entries, error: entriesError } = await supabaseAdmin
       .from("entries")
-      .select(
-        "id,date,created_at,note,note_type,meal_type,image_url,portion_grams,calories_kcal,calories_source"
-      )
+      .select("id,date,created_at,note,note_type,meal_type,image_url,portion_grams,calories_kcal,calories_source")
       .eq("user_id", userId)
       .gte("created_at", sevenDaysAgo.toISOString())
       .order("created_at", { ascending: true });
@@ -58,31 +54,36 @@ export async function POST(req: Request) {
       return Response.json({ error: entriesError.message }, { status: 500 });
     }
 
-    // 3) Prompt
-    const prompt = [
-      "You are a precise, concise health analyst.",
-      "Read the user's last 7 days entries and generate an end-of-day insight.",
-      "Output 4 sections exactly:",
-      "Digestion / Performance / Immunity / Energy",
-      "For each section: (1) 1 short insight (2) 1 action for tomorrow.",
-      "Keep total under 600 words. No fluff, no repetition.",
-      "If entries include images, use image_url as context (do not claim certainty).",
-      "",
-      "ENTRIES JSON:",
-      JSON.stringify(entries ?? [], null, 2),
-    ].join("\n");
+    const prompt = `
+You are a precise, concise health analyst.
+Read the user's last 7 days entries and generate an end-of-day insight.
+
+Output 4 sections exactly:
+Digestion
+Performance
+Immunity
+Energy
+
+For each section:
+- 1 short insight
+- 1 action for tomorrow
+
+Keep total under 600 words. No fluff. No repetition.
+
+ENTRIES JSON:
+${JSON.stringify(entries ?? [], null, 2)}
+`.trim();
 
     const completion = await openai.chat.completions.create({
       model: OPENAI_MODEL,
       messages: [
-        { role: "system", content: "Be concise, structured, and practical." },
+        { role: "system", content: "Be concise, structured, practical." },
         { role: "user", content: prompt },
       ],
     });
 
     const insightText = completion.choices?.[0]?.message?.content?.trim() ?? "";
 
-    // 4) Save to daily_insights
     const today = new Date().toISOString().slice(0, 10);
 
     const { error: insertError } = await supabaseAdmin.from("daily_insights").insert({
