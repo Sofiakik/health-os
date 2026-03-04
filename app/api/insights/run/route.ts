@@ -3,104 +3,129 @@ import OpenAI from "openai";
 
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
-const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)");
+if (!SUPABASE_ANON_KEY) throw new Error("Missing SUPABASE_ANON_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY)");
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+if (!process.env.OPENAI_API_KEY) throw new Error("Missing OPENAI_API_KEY");
+
+const supabaseAdmin = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function GET() {
-  return Response.json({ ok: true, hint: "Use POST (Authorization: Bearer <token>)" });
+function yyyyMmDd(d: Date) {
+  return d.toISOString().slice(0, 10);
 }
 
-function getBearerToken(req: Request) {
-  const h = req.headers.get("authorization") || "";
-  const m = h.match(/^Bearer\s+(.+)$/i);
-  return m?.[1] ?? null;
+export async function GET() {
+  return Response.json({ ok: true, hint: "Use POST with Authorization: Bearer <access_token>" });
 }
 
 export async function POST(req: Request) {
   try {
-    const token = getBearerToken(req);
+    // 1) Auth via Bearer token (NOT cookies)
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
     if (!token) {
       return Response.json(
-        { error: "Not authenticated (missing Authorization: Bearer token)" },
+        { error: "Not authenticated (missing Authorization Bearer token)" },
         { status: 401 }
       );
     }
 
     const { data: userData, error: userErr } = await supabaseAnon.auth.getUser(token);
+
     if (userErr || !userData?.user) {
       return Response.json({ error: "Not authenticated" }, { status: 401 });
     }
+
     const userId = userData.user.id;
 
-    const since = new Date();
-    since.setDate(since.getDate() - 7);
+    // 2) Get last 7 days of entries by `date` column (YYYY-MM-DD)
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 6);
 
-    const { data: entries, error: entriesErr } = await supabaseAdmin
+    const endDate = yyyyMmDd(end);
+    const startDate = yyyyMmDd(start);
+
+    const { data: entries, error: entriesError } = await supabaseAdmin
       .from("entries")
-      .select("id,user_id,date,created_at,note,note_type,meal_type,image_url,portion_grams,calories_kcal,calories_source")
+      .select(
+        "id,date,note,note_type,meal_type,image_url,created_at,portion_grams,calories_kcal,calories_source"
+      )
       .eq("user_id", userId)
-      .gte("created_at", since.toISOString())
+      .gte("date", startDate)
+      .lte("date", endDate)
+      .order("date", { ascending: true })
       .order("created_at", { ascending: true });
 
-    if (entriesErr) {
-      return Response.json({ error: entriesErr.message }, { status: 500 });
+    if (entriesError) {
+      return Response.json({ error: entriesError.message }, { status: 500 });
     }
 
     const model = process.env.OPENAI_MODEL || "gpt-5.2";
 
-    const prompt = `
-You are a precise, concise health analyst.
-Read the last 7 days entries and generate insights (<=600 words total).
+    // Keep prompt compact (cheaper + less brittle)
+    const compact = (entries ?? []).map((e: any) => ({
+      date: e.date,
+      note_type: e.note_type,
+      meal_type: e.meal_type,
+      note: e.note,
+      image_url: e.image_url,
+      portion_grams: e.portion_grams,
+      calories_kcal: e.calories_kcal,
+      calories_source: e.calories_source,
+    }));
 
-Output sections:
-Digestion
-Performance
-Immunity
-Energy
-
-For each section:
-- 1 short insight
-- 1 action for tomorrow
-
-If an image_url exists, mention calories as an estimate.
-
-Entries JSON:
-${JSON.stringify(entries ?? [], null, 2)}
-`.trim();
+    const prompt = [
+      "You are a precise, concise health analyst.",
+      "Read the user's last 7 days of entries and produce DAILY INSIGHTS.",
+      "Output format (exact sections):",
+      "Digestion: (1 insight) + (1 action for tomorrow)",
+      "Performance: (1 insight) + (1 action for tomorrow)",
+      "Immunity: (1 insight) + (1 action for tomorrow)",
+      "Energy: (1 insight) + (1 action for tomorrow)",
+      "Rules: under 600 words total, no fluff, no repetition. If data is missing, say so briefly.",
+      "",
+      "Entries JSON:",
+      JSON.stringify(compact),
+    ].join("\n");
 
     const completion = await openai.chat.completions.create({
       model,
       messages: [
-        { role: "system", content: "Be concise. No fluff. Actionable." },
+        { role: "system", content: "Be concise. Be actionable. Use the required section headings." },
         { role: "user", content: prompt },
       ],
     });
 
-    const insightText = completion.choices[0]?.message?.content?.trim() ?? "";
+    const insightText = completion.choices?.[0]?.message?.content ?? "";
 
-    const day = new Date().toISOString().slice(0, 10);
+    // 3) Save insight row (one row per run; allowed to have multiple per day)
+    const today = yyyyMmDd(new Date());
 
-    const { error: insErr } = await supabaseAdmin.from("daily_insights").insert({
+    const { error: insertError } = await supabaseAdmin.from("daily_insights").insert({
       user_id: userId,
-      day,
+      day: today,
       window_end_at: new Date().toISOString(),
       provider: "openai",
       model,
-      insight: { text: insightText },
+      insight: { text: insightText, start_date: startDate, end_date: endDate },
     });
 
-    if (insErr) {
-      return Response.json({ error: insErr.message }, { status: 500 });
+    if (insertError) {
+      return Response.json({ error: insertError.message }, { status: 500 });
     }
 
-    return Response.json({ ok: true, insight: insightText });
-  } catch (e: any) {
-    return Response.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
+    return Response.json({ ok: true, insight: insightText, startDate, endDate });
+  } catch (err: any) {
+    return Response.json({ error: err?.message ?? "Unknown error" }, { status: 500 });
   }
 }
