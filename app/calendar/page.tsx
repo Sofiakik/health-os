@@ -50,6 +50,33 @@ const labelMealType: Record<MealType, string> = {
   snack: "Snack",
 };
 
+function SignedImage({ path }: { path: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrl(path, 60 * 60); // 1 hour
+
+      setUrl(data?.signedUrl ?? null);
+    };
+
+    load();
+  }, [path]);
+
+  if (!url) return null;
+
+  return (
+    <img
+      src={url}
+      alt="entry"
+      style={{ maxWidth: "100%", borderRadius: 8 }}
+    />
+  );
+}
+
+
 export default function CalendarPage() {
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -157,18 +184,18 @@ export default function CalendarPage() {
 
   const uploadIfAny = async (uid: string, date: string) => {
     if (!file) return null;
-
+  
     const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
     const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
-
-    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
-      upsert: false,
-    });
-
-    if (upErr) throw upErr;
-
-    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-    return data.publicUrl ?? null;
+  
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, file, { upsert: false });
+  
+    if (error) throw error;
+  
+    // return ONLY the path
+    return path;
   };
 
   const saveEntry = async () => {
@@ -408,10 +435,7 @@ export default function CalendarPage() {
                 <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 8 }}>{e.note}</p>
               )}
 
-              {e.image_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={e.image_url} alt="entry" style={{ maxWidth: "100%", borderRadius: 8 }} />
-              )}
+              {e.image_url && <SignedImage path={e.image_url} />}
             </div>
           ))}
         </div>
