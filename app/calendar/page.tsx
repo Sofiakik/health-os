@@ -1,5 +1,6 @@
 "use client";
 
+import heic2any from "heic2any";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -185,16 +186,33 @@ export default function CalendarPage() {
   const uploadIfAny = async (uid: string, date: string) => {
     if (!file) return null;
   
-    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    let uploadFile: File = file;
+  
+    // convert HEIC → JPG
+    if (file.type === "image/heic" || file.name.toLowerCase().endsWith(".heic")) {
+      const converted = await heic2any({
+        blob: file,
+        toType: "image/jpeg",
+        quality: 0.9,
+      });
+  
+      const blob = Array.isArray(converted) ? converted[0] : converted;
+  
+      uploadFile = new File([blob as Blob], file.name.replace(/\.heic$/i, ".jpg"), {
+        type: "image/jpeg",
+      });
+    }
+  
+    const ext = uploadFile.name.split(".").pop()?.toLowerCase() || "jpg";
     const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
   
     const { error } = await supabase.storage
       .from(BUCKET)
-      .upload(path, file, { upsert: false });
+      .upload(path, uploadFile, { upsert: false });
   
     if (error) throw error;
   
-    // return ONLY the path
+    // store only the path (not public URL)
     return path;
   };
 
