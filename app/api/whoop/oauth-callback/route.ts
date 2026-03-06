@@ -15,6 +15,8 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Missing OAuth code" }, { status: 400 });
     }
 
+    console.log("WHOOP CODE RECEIVED");
+
     const tokenRes = await fetch(
       "https://api.prod.whoop.com/oauth/oauth2/token",
       {
@@ -34,26 +36,28 @@ export async function GET(req: Request) {
 
     const tokens = await tokenRes.json();
 
+    console.log("WHOOP TOKEN RESPONSE", tokens);
+
     if (!tokens.access_token) {
       return NextResponse.json(tokens, { status: 400 });
     }
 
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
-    await supabase.from("whoop_tokens").upsert({
-      user_id: tokens.user_id ?? "unknown",
+    const insert = await supabase.from("whoop_tokens").insert({
+      user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expires_at: expiresAt.toISOString(),
     });
 
+    console.log("SUPABASE INSERT RESULT", insert);
+
     return NextResponse.redirect(
       `${process.env.NEXT_PUBLIC_APP_URL}/calendar`
     );
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message || "Unknown error" },
-      { status: 500 }
-    );
+    console.error("WHOOP CALLBACK ERROR", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
