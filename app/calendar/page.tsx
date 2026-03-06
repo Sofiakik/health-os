@@ -17,6 +17,16 @@ type Entry = {
   created_at: string;
 };
 
+type DailyInsightRow = {
+  id: string;
+  day: string;
+  created_at: string;
+  insight: {
+    text?: string;
+    [key: string]: unknown;
+  } | null;
+};
+
 const BUCKET = "entry-images";
 
 const today = () => {
@@ -48,7 +58,11 @@ export default function CalendarPage() {
 
   const [selectedDate, setSelectedDate] = useState(today());
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingEntries, setLoadingEntries] = useState(true);
+
+  const [latestInsight, setLatestInsight] = useState<DailyInsightRow | null>(null);
+  const [loadingInsight, setLoadingInsight] = useState(true);
+  const [generatingInsight, setGeneratingInsight] = useState(false);
 
   const [noteType, setNoteType] = useState<NoteType>("meal");
   const [mealType, setMealType] = useState<MealType>("breakfast");
@@ -57,31 +71,39 @@ export default function CalendarPage() {
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [insightError, setInsightError] = useState("");
 
   useEffect(() => {
     const init = async () => {
       const { data, error } = await supabase.auth.getSession();
       const uid = data.session?.user?.id;
+
       if (error || !uid) {
         router.replace("/login");
         return;
       }
+
       setUserId(uid);
     };
 
     init();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       const uid = session?.user?.id;
-      if (!uid) router.replace("/login");
-      else setUserId(uid);
+
+      if (!uid) {
+        router.replace("/login");
+        return;
+      }
+
+      setUserId(uid);
     });
 
     return () => sub.subscription.unsubscribe();
   }, [router]);
 
   const fetchEntries = async (uid: string, date: string) => {
-    setLoading(true);
+    setLoadingEntries(true);
     setError("");
 
     const { data, error } = await supabase
@@ -98,14 +120,40 @@ export default function CalendarPage() {
       setEntries((data ?? []) as Entry[]);
     }
 
-    setLoading(false);
+    setLoadingEntries(false);
+  };
+
+  const fetchLatestInsight = async (uid: string) => {
+    setLoadingInsight(true);
+    setInsightError("");
+
+    const { data, error } = await supabase
+      .from("daily_insights")
+      .select("id,day,created_at,insight")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      setLatestInsight(null);
+      setInsightError(error.message);
+    } else {
+      setLatestInsight((data as DailyInsightRow | null) ?? null);
+    }
+
+    setLoadingInsight(false);
   };
 
   useEffect(() => {
     if (!userId) return;
     fetchEntries(userId, selectedDate);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, selectedDate]);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchLatestInsight(userId);
+  }, [userId]);
 
   const uploadIfAny = async (uid: string, date: string) => {
     if (!file) return null;
@@ -116,6 +164,7 @@ export default function CalendarPage() {
     const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, {
       upsert: false,
     });
+
     if (upErr) throw upErr;
 
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
@@ -127,6 +176,7 @@ export default function CalendarPage() {
 
     const hasText = note.trim().length > 0;
     const hasImage = !!file;
+
     if (!hasText && !hasImage) return;
 
     setSaving(true);
@@ -139,8 +189,8 @@ export default function CalendarPage() {
         user_id: userId,
         date: selectedDate,
         note: hasText ? note.trim() : null,
-        note_type: noteType, // must match enum (meal/symptom/state)
-        meal_type: noteType === "meal" ? mealType : null, // must be null unless meal
+        note_type: noteType,
+        meal_type: noteType === "meal" ? mealType : null,
         image_url: imageUrl,
       };
 
@@ -157,17 +207,52 @@ export default function CalendarPage() {
     }
   };
 
+  const generateInsights = async () => {
+    setGeneratingInsight(true);
+    setInsightError("");
+
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+
+      if (error || !accessToken) {
+        throw new Error("No active session found");
+      }
+
+      const response = await fetch("/api/insights/run", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const body = await response.json();
+
+      if (!response.ok) {
+        throw new Error(body?.error || "Failed to generate insights");
+      }
+
+      if (userId) {
+        await fetchLatestInsight(userId);
+      }
+    } catch (e: any) {
+      setInsightError(e?.message ?? "Failed to generate insights");
+    } finally {
+      setGeneratingInsight(false);
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     router.replace("/login");
   };
 
-  // Enter = save, Cmd+Enter = newline
   const onTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== "Enter") return;
 
     if (e.metaKey) {
       e.preventDefault();
+
       const el = textareaRef.current;
       if (!el) return;
 
@@ -178,9 +263,11 @@ export default function CalendarPage() {
       const nextPos = start + 1;
 
       setNote(next);
+
       requestAnimationFrame(() => {
         el.selectionStart = el.selectionEnd = nextPos;
       });
+
       return;
     }
 
@@ -188,7 +275,9 @@ export default function CalendarPage() {
     saveEntry();
   };
 
-  if (!userId) return <p style={{ padding: 24 }}>Loading…</p>;
+  if (!userId) {
+    return <p style={{ padding: 24 }}>Loading…</p>;
+  }
 
   return (
     <div style={{ padding: 24, maxWidth: 720 }}>
@@ -197,6 +286,46 @@ export default function CalendarPage() {
         <button onClick={signOut} style={{ marginLeft: "auto" }}>
           Sign out
         </button>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #ddd",
+          padding: 12,
+          borderRadius: 8,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 10,
+          }}
+        >
+          <h3 style={{ margin: 0 }}>Latest insight</h3>
+          <button onClick={generateInsights} disabled={generatingInsight} style={{ marginLeft: "auto" }}>
+            {generatingInsight ? "Generating…" : "Generate insights"}
+          </button>
+        </div>
+
+        {loadingInsight ? (
+          <p>Loading insight…</p>
+        ) : latestInsight ? (
+          <>
+            <p style={{ fontSize: 12, opacity: 0.6, marginTop: 0 }}>
+              For day {latestInsight.day} · generated {new Date(latestInsight.created_at).toLocaleString()}
+            </p>
+            <div style={{ whiteSpace: "pre-wrap" }}>
+              {latestInsight.insight?.text || "No text in insight"}
+            </div>
+          </>
+        ) : (
+          <p style={{ opacity: 0.7 }}>No insights generated yet.</p>
+        )}
+
+        {insightError && <p style={{ color: "red", marginTop: 10 }}>{insightError}</p>}
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16 }}>
@@ -227,7 +356,14 @@ export default function CalendarPage() {
         )}
       </div>
 
-      <div style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8, marginBottom: 16 }}>
+      <div
+        style={{
+          border: "1px solid #ddd",
+          padding: 12,
+          borderRadius: 8,
+          marginBottom: 16,
+        }}
+      >
         <textarea
           ref={textareaRef}
           value={note}
@@ -250,7 +386,7 @@ export default function CalendarPage() {
 
       <h3 style={{ marginTop: 0 }}>Entries for {selectedDate}</h3>
 
-      {loading ? (
+      {loadingEntries ? (
         <p>Loading…</p>
       ) : entries.length === 0 ? (
         <p style={{ opacity: 0.7 }}>No entries yet.</p>
