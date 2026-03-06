@@ -148,28 +148,22 @@ export default function CalendarPage() {
 
   const uploadIfAny = async (uid: string, date: string) => {
     if (!file) return null;
-
-    const uploadIfAny = async (uid: string, date: string) => {
-      if (!file) return null;
-    
-      const uploadIfAny = async (uid: string, date: string) => {
-        if (!file) return null;
-      
-        const uploadFile = await convertHeicIfNeeded(file);
-      
-        const ext =
-          uploadFile.name.split(".").pop()?.toLowerCase() || "jpg";
-      
-        const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
-      
-        const { error } = await supabase.storage
-          .from(BUCKET)
-          .upload(path, uploadFile);
-      
-        if (error) throw error;
-      
-        return path;
-      };
+  
+    const uploadFile = await convertHeicIfNeeded(file);
+  
+    const ext =
+      uploadFile.name.split(".").pop()?.toLowerCase() || "jpg";
+  
+    const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
+  
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, uploadFile);
+  
+    if (error) throw error;
+  
+    return path;
+  };
 
   const saveEntry = async () => {
     if (!userId) return;
