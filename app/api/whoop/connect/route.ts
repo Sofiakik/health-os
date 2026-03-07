@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 
 export async function GET() {
-  const clientId = process.env.WHOOP_CLIENT_ID;
-  const redirectUri = process.env.WHOOP_REDIRECT_URI;
+  const clientId = process.env.WHOOP_CLIENT_ID!;
+  const redirectUri = process.env.WHOOP_REDIRECT_URI!;
+
+  // generate secure random state
+  const state = crypto.randomBytes(16).toString("hex");
 
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: clientId!,
-    redirect_uri: redirectUri!,   // ← CRITICAL
+    client_id: clientId,
+    redirect_uri: redirectUri,
     scope: "read:recovery read:sleep read:cycles read:workout",
+    state,   // REQUIRED by WHOOP
   });
 
   const authUrl =
