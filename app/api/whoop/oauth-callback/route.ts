@@ -36,6 +36,11 @@ export async function GET(req: Request) {
 
     const tokens = await tokenRes.json();
 
+    return NextResponse.json({
+      tokenResponse: tokens,
+      status: tokenRes.status
+    });
+
     console.log("WHOOP TOKEN RESPONSE", tokens);
 
     if (!tokens.access_token) {
