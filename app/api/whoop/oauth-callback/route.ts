@@ -44,20 +44,17 @@ export async function GET(req: Request) {
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
   const { error } = await supabase
-    .from("whoop_tokens")
-    .insert({
+  .from("whoop_tokens")
+  .upsert(
+    {
       user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token ?? null,
       expires_at: expiresAt.toISOString(),
-    });
-
-  if (error) {
-    return NextResponse.json({
-      error: "Supabase insert failed",
-      details: error
-    });
-  }
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "user_id" }
+  );
 
   return NextResponse.redirect(
     `${process.env.NEXT_PUBLIC_APP_URL}/calendar`
