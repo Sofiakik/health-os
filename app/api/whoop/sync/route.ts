@@ -9,11 +9,18 @@ export async function GET() {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    // get token
-    const { data: tokens } = await supabase
+    // -------------------------
+    // Get Whoop token
+    // -------------------------
+
+    const { data: tokens, error: tokenError } = await supabase
       .from("whoop_tokens")
       .select("*")
       .limit(1);
+
+    if (tokenError) {
+      return NextResponse.json({ error: tokenError.message });
+    }
 
     if (!tokens || tokens.length === 0) {
       return NextResponse.json({ error: "No Whoop token found" });
@@ -25,7 +32,9 @@ export async function GET() {
       Authorization: `Bearer ${token.access_token}`
     };
 
-    // ---------- FETCH WHOOP DATA ----------
+    // -------------------------
+    // Fetch WHOOP data (v2 API)
+    // -------------------------
 
     const cycleRes = await fetch(
       "https://api.prod.whoop.com/v2/cycle?limit=5",
@@ -52,7 +61,9 @@ export async function GET() {
     const sleeps = await sleepRes.json();
     const workouts = await workoutRes.json();
 
-    // ---------- STORE RAW ----------
+    // -------------------------
+    // Store RAW payload
+    // -------------------------
 
     await supabase.from("whoop_raw").insert([
       {
@@ -77,51 +88,63 @@ export async function GET() {
       }
     ]);
 
-    // ---------- NORMALIZE RECOVERY ----------
+    // -------------------------
+    // Normalize RECOVERY
+    // -------------------------
 
     if (recoveries.records) {
+
       const metrics = recoveries.records.map((r: any) => [
+
         {
           user_id: token.user_id,
           metric_type: "recovery_score",
           metric_value: r.score?.recovery_score,
           metric_unit: "%",
-          metric_timestamp: r.created_at,
+          metric_timestamp: r.created_at ?? new Date().toISOString(),
           source: "whoop",
           raw_data: r
         },
+
         {
           user_id: token.user_id,
           metric_type: "hrv",
           metric_value: r.score?.hrv_rmssd_milli,
           metric_unit: "ms",
-          metric_timestamp: r.created_at,
+          metric_timestamp: r.created_at ?? new Date().toISOString(),
           source: "whoop",
           raw_data: r
         },
+
         {
           user_id: token.user_id,
           metric_type: "resting_hr",
           metric_value: r.score?.resting_heart_rate,
           metric_unit: "bpm",
-          metric_timestamp: r.created_at,
+          metric_timestamp: r.created_at ?? new Date().toISOString(),
           source: "whoop",
           raw_data: r
         }
+
       ]).flat();
 
       await supabase.from("health_metrics").insert(metrics);
     }
 
-    // ---------- NORMALIZE SLEEP ----------
+    // -------------------------
+    // Normalize SLEEP
+    // -------------------------
 
     if (sleeps.records) {
+
       const metrics = sleeps.records.map((s: any) => ({
         user_id: token.user_id,
         metric_type: "sleep_duration",
-        metric_value: s.score?.stage_summary?.total_in_bed_time_milli / 3600000,
+        metric_value: s.score?.stage_summary?.total_in_bed_time_milli
+          ? s.score.stage_summary.total_in_bed_time_milli / 3600000
+          : null,
         metric_unit: "hours",
-        metric_timestamp: s.created_at,
+        metric_timestamp: s.created_at ?? new Date().toISOString(),
         source: "whoop",
         raw_data: s
       }));
@@ -129,15 +152,18 @@ export async function GET() {
       await supabase.from("health_metrics").insert(metrics);
     }
 
-    // ---------- NORMALIZE STRAIN ----------
+    // -------------------------
+    // Normalize STRAIN
+    // -------------------------
 
     if (cycles.records) {
+
       const metrics = cycles.records.map((c: any) => ({
         user_id: token.user_id,
         metric_type: "strain",
         metric_value: c.score?.strain,
         metric_unit: "score",
-        metric_timestamp: c.start,
+        metric_timestamp: c.start ?? new Date().toISOString(),
         source: "whoop",
         raw_data: c
       }));
@@ -147,15 +173,17 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      cycles: cycles.records?.length,
-      recoveries: recoveries.records?.length,
-      sleeps: sleeps.records?.length,
-      workouts: workouts.records?.length
+      cycles: cycles.records?.length ?? 0,
+      recoveries: recoveries.records?.length ?? 0,
+      sleeps: sleeps.records?.length ?? 0,
+      workouts: workouts.records?.length ?? 0
     });
 
   } catch (err: any) {
+
     return NextResponse.json({
       error: err.message
     });
+
   }
 }
