@@ -1,9 +1,8 @@
-// middleware.ts
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-export async function middleware(request: NextRequest) {
-  // Start the response we'll return
+export async function proxy(request: NextRequest) {
+
   let response = NextResponse.next({
     request: {
       headers: request.headers,
@@ -27,15 +26,13 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // This makes Supabase read/refresh the session and write sb-* cookies to the response when needed
   await supabase.auth.getUser();
 
   return response;
 }
 
-// Apply to all routes except static files
 export const config = {
-    matcher: [
-      "/((?!api/whoop|_next/static|_next/image|favicon.ico).*)",
-    ],
-  };
+  matcher: [
+    "/((?!api|whoop|_next/static|_next/image|favicon.ico).*)",
+  ],
+};
