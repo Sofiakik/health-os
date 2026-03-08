@@ -243,11 +243,20 @@ export default function CalendarPage() {
   const sendQuestion = async () => {
 
     if (!question.trim() || !insight) return;
-
+  
+    const userMessage = {
+      role: "user",
+      message: question
+    };
+  
+    // show user message immediately
+    setDialogue(prev => [...prev, userMessage]);
+  
+    setQuestion("");
     setChatLoading(true);
-
+  
     try {
-
+  
       const res = await fetch("/api/insights/chat", {
         method: "POST",
         headers: {
@@ -256,25 +265,30 @@ export default function CalendarPage() {
         body: JSON.stringify({
           user_id: userId,
           insight_id: insight.id,
-          message: question
+          message: userMessage.message
         })
       });
-
+  
       const data = await res.json();
-
-      setChatReply(data.reply);
-
-      setQuestion("");
-
+  
+      const assistantMessage = {
+        role: "assistant",
+        message: data.reply
+      };
+  
+      // append assistant response
+      setDialogue(prev => [...prev, assistantMessage]);
+  
     } catch (e) {
-
+  
       console.error(e);
-
+  
     } finally {
-
+  
       setChatLoading(false);
-
+  
     }
+  
   };
 
   const signOut = async () => {
