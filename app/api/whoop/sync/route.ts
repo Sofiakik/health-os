@@ -28,7 +28,7 @@ export async function GET() {
     const token = tokens[0];
 
     const res = await fetch(
-      "https://api.prod.whoop.com/developer/v1/recovery",
+      "https://api.prod.whoop.com/developer/v1/recovery?limit=10",
       {
         headers: {
           Authorization: `Bearer ${token.access_token}`
