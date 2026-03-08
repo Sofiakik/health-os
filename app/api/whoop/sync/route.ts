@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export async function GET() {
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
   const { data: tokens } = await supabase
     .from("whoop_tokens")
@@ -22,14 +22,12 @@ export async function GET() {
     "https://api.prod.whoop.com/developer/v1/recovery",
     {
       headers: {
-        Authorization: `Bearer ${token.access_token}`
-      }
+        Authorization: `Bearer ${token.access_token}`,
+      },
     }
   );
 
   const data = await res.json();
 
-  return NextResponse.json({
-    whoop_response_sample: data
-  });
+  return NextResponse.json(data);
 }
