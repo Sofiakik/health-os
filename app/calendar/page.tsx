@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-export const dynamic = "force-dynamic";
-
 type NoteType = "meal" | "symptom" | "state";
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
@@ -121,33 +119,24 @@ export default function CalendarPage() {
 
   async function convertHeicIfNeeded(file: File): Promise<File> {
     const name = file.name.toLowerCase();
-  
+
     const isHeic =
       name.endsWith(".heic") ||
       name.endsWith(".heif") ||
       file.type.includes("heic");
-  
+
     if (!isHeic) return file;
-  
+
     const heic2any = (await import("heic2any")).default;
-  
+
     const converted = await heic2any({
       blob: file,
       toType: "image/jpeg",
       quality: 0.92,
     });
-  
+
     const blob = Array.isArray(converted) ? converted[0] : converted;
-  
-    return new File(
-      [blob as Blob],
-      file.name.replace(/\.(heic|heif)$/i, ".jpg"),
-      { type: "image/jpeg" }
-    );
-  }
-  
-    const blob = Array.isArray(converted) ? converted[0] : converted;
-  
+
     return new File(
       [blob as Blob],
       file.name.replace(/\.(heic|heif)$/i, ".jpg"),
@@ -157,20 +146,20 @@ export default function CalendarPage() {
 
   const uploadIfAny = async (uid: string, date: string) => {
     if (!file) return null;
-  
+
     const uploadFile = await convertHeicIfNeeded(file);
-  
+
     const ext =
       uploadFile.name.split(".").pop()?.toLowerCase() || "jpg";
-  
+
     const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
-  
+
     const { error } = await supabase.storage
       .from(BUCKET)
       .upload(path, uploadFile);
-  
+
     if (error) throw error;
-  
+
     return path;
   };
 
@@ -216,7 +205,10 @@ export default function CalendarPage() {
     router.replace("/login");
   };
 
-  if (!userId) return <p style={{ padding: 24 }}>Loading…</p>;
+  // SAFE EARLY RETURN (fixes build error)
+  if (!userId) {
+    return <p style={{ padding: 24 }}>Loading…</p>;
+  }
 
   return (
     <div style={{ padding: 24, maxWidth: 720 }}>

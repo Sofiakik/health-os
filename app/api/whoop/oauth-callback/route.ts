@@ -40,15 +40,19 @@ export async function GET(req: Request) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+    const expiresInSeconds = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
+    const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
 
-    // Insert tokens
-    const { error } = await supabase.from("whoop_tokens").insert({
-      user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token ?? null,
-      expires_at: expiresAt.toISOString(),
-    });
+    // Upsert tokens (insert or update on conflict) so re-connecting WHOOP doesn't fail
+    const { error } = await supabase.from("whoop_tokens").upsert(
+      {
+        user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token ?? null,
+        expires_at: expiresAt.toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
 
     if (error) {
       return NextResponse.json({
