@@ -2,7 +2,15 @@
     "crons": [
       {
         "path": "/api/whoop/sync",
-        "schedule": "0 */6 * * *"
+        "schedule": "50 19 * * *"
+      },
+      {
+        "path": "/api/patterns/discover",
+        "schedule": "55 19 * * *"
+      },
+      {
+        "path": "/api/insights/generate",
+        "schedule": "0 20 * * *"
       }
     ]
   }

@@ -4,15 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-type NoteType = "meal" | "symptom" | "state";
-type MealType = "breakfast" | "lunch" | "dinner" | "snack";
-
 type Entry = {
   id: string;
   date: string;
   note: string | null;
-  note_type: NoteType | null;
-  meal_type: MealType | null;
   image_url: string | null;
   created_at: string;
 };
@@ -20,22 +15,8 @@ type Entry = {
 const BUCKET = "entry-images";
 
 function today() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
 }
-
-const labelNoteType = {
-  meal: "Meal",
-  symptom: "Symptom",
-  state: "State",
-};
-
-const labelMealType = {
-  breakfast: "Breakfast",
-  lunch: "Lunch",
-  dinner: "Dinner",
-  snack: "Snack",
-};
 
 function SignedImage({ path }: { path: string }) {
   const [url, setUrl] = useState<string | null>(null);
@@ -65,21 +46,24 @@ function SignedImage({ path }: { path: string }) {
 
 export default function CalendarPage() {
   const router = useRouter();
+
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState(today());
-  const [entries, setEntries] = useState<Entry[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  const [noteType, setNoteType] = useState<NoteType>("meal");
-  const [mealType, setMealType] = useState<MealType>("breakfast");
+  const [selectedDate, setSelectedDate] = useState(today());
+
+  const [entries, setEntries] = useState<Entry[]>([]);
+
   const [note, setNote] = useState("");
 
   const [file, setFile] = useState<File | null>(null);
 
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [insight, setInsight] = useState<any>(null);
+
+  const [question, setQuestion] = useState("");
+
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const init = async () => {
@@ -99,8 +83,6 @@ export default function CalendarPage() {
   }, [router]);
 
   const fetchEntries = async (uid: string, date: string) => {
-    setLoading(true);
-
     const { data } = await supabase
       .from("entries")
       .select("*")
@@ -108,55 +90,40 @@ export default function CalendarPage() {
       .eq("date", date)
       .order("created_at", { ascending: false });
 
-    setEntries((data ?? []) as Entry[]);
-    setLoading(false);
+    setEntries(data ?? []);
+  };
+
+  const fetchInsight = async (uid: string, date: string) => {
+    const { data } = await supabase
+      .from("daily_insights")
+      .select("*")
+      .eq("user_id", uid)
+      .eq("date", date)
+      .single();
+
+    setInsight(data);
   };
 
   useEffect(() => {
     if (!userId) return;
+
     fetchEntries(userId, selectedDate);
+
+    fetchInsight(userId, selectedDate);
+
+    setLoading(false);
   }, [userId, selectedDate]);
-
-  async function convertHeicIfNeeded(file: File): Promise<File> {
-    const name = file.name.toLowerCase();
-
-    const isHeic =
-      name.endsWith(".heic") ||
-      name.endsWith(".heif") ||
-      file.type.includes("heic");
-
-    if (!isHeic) return file;
-
-    const heic2any = (await import("heic2any")).default;
-
-    const converted = await heic2any({
-      blob: file,
-      toType: "image/jpeg",
-      quality: 0.92,
-    });
-
-    const blob = Array.isArray(converted) ? converted[0] : converted;
-
-    return new File(
-      [blob as Blob],
-      file.name.replace(/\.(heic|heif)$/i, ".jpg"),
-      { type: "image/jpeg" }
-    );
-  }
 
   const uploadIfAny = async (uid: string, date: string) => {
     if (!file) return null;
 
-    const uploadFile = await convertHeicIfNeeded(file);
-
-    const ext =
-      uploadFile.name.split(".").pop()?.toLowerCase() || "jpg";
+    const ext = file.name.split(".").pop();
 
     const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
 
     const { error } = await supabase.storage
       .from(BUCKET)
-      .upload(path, uploadFile);
+      .upload(path, file);
 
     if (error) throw error;
 
@@ -166,47 +133,47 @@ export default function CalendarPage() {
   const saveEntry = async () => {
     if (!userId) return;
 
-    const hasText = note.trim().length > 0;
-    const hasImage = !!file;
+    const imagePath = await uploadIfAny(userId, selectedDate);
 
-    if (!hasText && !hasImage) return;
+    await supabase.from("entries").insert({
+      user_id: userId,
+      date: selectedDate,
+      note,
+      image_url: imagePath,
+    });
 
-    setSaving(true);
+    setNote("");
+    setFile(null);
 
-    try {
-      const imagePath = await uploadIfAny(userId, selectedDate);
+    fetchEntries(userId, selectedDate);
+  };
 
-      const payload = {
+  const sendQuestion = async () => {
+    if (!insight || !question) return;
+
+    await fetch("/api/insights/dialogue", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         user_id: userId,
-        date: selectedDate,
-        note: hasText ? note.trim() : null,
-        note_type: noteType,
-        meal_type: noteType === "meal" ? mealType : null,
-        image_url: imagePath,
-      };
+        insight_id: insight.id,
+        role: "user",
+        message: question,
+      }),
+    });
 
-      const { error } = await supabase.from("entries").insert(payload);
-
-      if (error) throw error;
-
-      setNote("");
-      setFile(null);
-
-      await fetchEntries(userId, selectedDate);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
+    setQuestion("");
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
+
     router.replace("/login");
   };
 
-  // SAFE EARLY RETURN (fixes build error)
-  if (!userId) {
+  if (loading) {
     return <p style={{ padding: 24 }}>Loading…</p>;
   }
 
@@ -214,6 +181,7 @@ export default function CalendarPage() {
     <div style={{ padding: 24, maxWidth: 720 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h2>Calendar</h2>
+
         <button onClick={signOut} style={{ marginLeft: "auto" }}>
           Sign out
         </button>
@@ -227,33 +195,11 @@ export default function CalendarPage() {
         />
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <select
-          value={noteType}
-          onChange={(e) => setNoteType(e.target.value as NoteType)}
-        >
-          <option value="meal">Meal</option>
-          <option value="symptom">Symptom</option>
-          <option value="state">State</option>
-        </select>
-
-        {noteType === "meal" && (
-          <select
-            value={mealType}
-            onChange={(e) => setMealType(e.target.value as MealType)}
-          >
-            <option value="breakfast">Breakfast</option>
-            <option value="lunch">Lunch</option>
-            <option value="dinner">Dinner</option>
-            <option value="snack">Snack</option>
-          </select>
-        )}
-      </div>
-
       <textarea
         ref={textareaRef}
         value={note}
         onChange={(e) => setNote(e.target.value)}
+        placeholder="Add note"
         style={{ width: "100%", marginTop: 16 }}
       />
 
@@ -261,31 +207,22 @@ export default function CalendarPage() {
         <input
           type="file"
           accept="image/*"
-          onChange={(e) =>
-            setFile(e.target.files?.[0] ?? null)
-          }
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
       </div>
 
       <button
         onClick={saveEntry}
-        disabled={saving}
         style={{ marginTop: 12 }}
       >
-        {saving ? "Saving…" : "Save"}
+        Save
       </button>
-
-      {error && (
-        <p style={{ color: "red", marginTop: 10 }}>{error}</p>
-      )}
 
       <h3 style={{ marginTop: 24 }}>
         Entries for {selectedDate}
       </h3>
 
-      {loading ? (
-        <p>Loading…</p>
-      ) : entries.length === 0 ? (
+      {entries.length === 0 ? (
         <p>No entries yet.</p>
       ) : (
         entries.map((e) => (
@@ -298,12 +235,6 @@ export default function CalendarPage() {
               marginTop: 10,
             }}
           >
-            <strong>
-              {e.note_type
-                ? labelNoteType[e.note_type]
-                : "Entry"}
-            </strong>
-
             {e.note && (
               <p style={{ whiteSpace: "pre-wrap" }}>
                 {e.note}
@@ -315,6 +246,45 @@ export default function CalendarPage() {
             )}
           </div>
         ))
+      )}
+
+      {insight && (
+        <div
+          style={{
+            marginTop: 30,
+            padding: 16,
+            border: "1px solid #ddd",
+            borderRadius: 8,
+            background: "#fafafa",
+          }}
+        >
+          <h3>Daily Insight</h3>
+
+          <p style={{ whiteSpace: "pre-wrap" }}>
+            {insight.insight_text}
+          </p>
+
+          <small>
+            Generated{" "}
+            {new Date(insight.generated_at).toLocaleString()}
+          </small>
+
+          <div style={{ marginTop: 16 }}>
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="Ask about today's insight"
+              style={{ width: "100%" }}
+            />
+
+            <button
+              onClick={sendQuestion}
+              style={{ marginTop: 10 }}
+            >
+              Ask
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
