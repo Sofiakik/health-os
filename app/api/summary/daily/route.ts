@@ -38,41 +38,73 @@ export async function GET() {
       switch (m.metric_type) {
 
         case "sleep_duration":
-          s.sleep_duration = Number(m.metric_value);
+          s.sleep_duration = (s.sleep_duration ?? 0) + Number(m.metric_value);
           break;
-
+      
+        case "deep_sleep_duration":
+          s.deep_sleep_duration =
+            (s.deep_sleep_duration ?? 0) + Number(m.metric_value);
+          break;
+      
+        case "rem_sleep_duration":
+          s.rem_sleep_duration =
+            (s.rem_sleep_duration ?? 0) + Number(m.metric_value);
+          break;
+      
+        case "sleep_efficiency":
+          s.sleep_efficiency = Number(m.metric_value);
+          break;
+      
         case "recovery_score":
           s.recovery_score = Number(m.metric_value);
           break;
-
+      
         case "hrv":
           s.hrv = Number(m.metric_value);
           break;
-
+      
         case "resting_hr":
           s.resting_hr = Number(m.metric_value);
           break;
-
+      
+        case "respiratory_rate":
+          s.respiratory_rate = Number(m.metric_value);
+          break;
+      
+        case "skin_temperature":
+          s.skin_temperature = Number(m.metric_value);
+          break;
+      
+        case "blood_oxygen":
+          s.blood_oxygen = Number(m.metric_value);
+          break;
+      
         case "strain":
-          s.strain = Number(m.metric_value);
+          s.strain = Math.max(s.strain ?? 0, Number(m.metric_value));
           break;
-
+      
+        case "active_calories":
+          s.active_calories =
+            (s.active_calories ?? 0) + Number(m.metric_value);
+          break;
+      
         case "calories":
-          s.calories_estimated = Number(m.metric_value);
+          s.calories_estimated =
+            (s.calories_estimated ?? 0) + Number(m.metric_value);
           break;
-
+      
         case "protein":
-          s.protein = Number(m.metric_value);
+          s.protein = (s.protein ?? 0) + Number(m.metric_value);
           break;
-
+      
         case "carbs":
-          s.carbs = Number(m.metric_value);
+          s.carbs = (s.carbs ?? 0) + Number(m.metric_value);
           break;
-
+      
         case "fat":
-          s.fat = Number(m.metric_value);
+          s.fat = (s.fat ?? 0) + Number(m.metric_value);
           break;
-
+      
       }
 
     }
