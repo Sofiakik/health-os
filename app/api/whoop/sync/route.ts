@@ -37,22 +37,22 @@ export async function GET() {
     // -------------------------
 
     const cycleRes = await fetch(
-      "https://api.prod.whoop.com/v2/cycle?limit=5",
+      "https://api.prod.whoop.com/developer/v2/cycle?limit=5",
       { headers }
     );
-
+    
     const recoveryRes = await fetch(
-      "https://api.prod.whoop.com/v2/recovery?limit=5",
+      "https://api.prod.whoop.com/developer/v2/recovery?limit=5",
       { headers }
     );
-
+    
     const sleepRes = await fetch(
-      "https://api.prod.whoop.com/v2/activity/sleep?limit=5",
+      "https://api.prod.whoop.com/developer/v2/activity/sleep?limit=5",
       { headers }
     );
-
+    
     const workoutRes = await fetch(
-      "https://api.prod.whoop.com/v2/activity/workout?limit=5",
+      "https://api.prod.whoop.com/developer/v2/activity/workout?limit=5",
       { headers }
     );
 
