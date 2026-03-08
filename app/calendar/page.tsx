@@ -145,6 +145,15 @@ export default function CalendarPage() {
       { type: "image/jpeg" }
     );
   }
+  
+    const blob = Array.isArray(converted) ? converted[0] : converted;
+  
+    return new File(
+      [blob as Blob],
+      file.name.replace(/\.(heic|heif)$/i, ".jpg"),
+      { type: "image/jpeg" }
+    );
+  }
 
   const uploadIfAny = async (uid: string, date: string) => {
     if (!file) return null;
