@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export async function GET(req: Request) {
 
@@ -28,8 +29,37 @@ export async function GET(req: Request) {
 
   const tokens = await tokenRes.json();
 
-  return NextResponse.json({
-    token_exchange_status: tokenRes.status,
-    tokens
-  });
+  if (!tokens.access_token) {
+    return NextResponse.json({
+      error: "Token exchange failed",
+      tokens
+    });
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+  const { error } = await supabase
+    .from("whoop_tokens")
+    .insert({
+      user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token ?? null,
+      expires_at: expiresAt.toISOString(),
+    });
+
+  if (error) {
+    return NextResponse.json({
+      error: "Supabase insert failed",
+      details: error
+    });
+  }
+
+  return NextResponse.redirect(
+    `${process.env.NEXT_PUBLIC_APP_URL}/calendar`
+  );
 }
