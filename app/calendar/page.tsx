@@ -1,8 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+
+type NoteType = "meal" | "symptom" | "state";
+type MealType = "breakfast" | "lunch" | "dinner" | "snack";
+
+type Entry = {
+  id: string;
+  date: string;
+  note: string | null;
+  note_type: NoteType | null;
+  meal_type: MealType | null;
+  image_url: string | null;
+  created_at: string;
+};
 
 type Dialogue = {
   role: string;
@@ -16,23 +29,70 @@ type Insight = {
   };
 };
 
+const BUCKET = "entry-images";
+
 function today() {
   const d = new Date();
   return d.toISOString().slice(0, 10);
 }
 
+function SignedImage({ path }: { path: string }) {
+
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+
+    const load = async () => {
+
+      const { data } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrl(path, 3600);
+
+      setUrl(data?.signedUrl ?? null);
+
+    };
+
+    load();
+
+  }, [path]);
+
+  if (!url) return null;
+
+  return (
+    <img
+      src={url}
+      alt="entry"
+      style={{ maxWidth: "100%", borderRadius: 8 }}
+    />
+  );
+
+}
+
 export default function CalendarPage() {
 
   const router = useRouter();
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(today());
 
+  const [entries, setEntries] = useState<Entry[]>([]);
   const [insight, setInsight] = useState<Insight | null>(null);
   const [dialogue, setDialogue] = useState<Dialogue[]>([]);
 
+  const [loading, setLoading] = useState(true);
+
+  const [noteType, setNoteType] = useState<NoteType>("meal");
+  const [mealType, setMealType] = useState<MealType>("breakfast");
+  const [note, setNote] = useState("");
+
+  const [file, setFile] = useState<File | null>(null);
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
   const [question, setQuestion] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
 
   /*
   -------------------------
@@ -63,11 +123,22 @@ export default function CalendarPage() {
 
   /*
   -------------------------
-  LOAD INSIGHT + DIALOGUE
+  LOAD DATA
   -------------------------
   */
 
-  const loadDay = async (uid: string, date: string) => {
+  const fetchDay = async (uid: string, date: string) => {
+
+    setLoading(true);
+
+    const { data: entryData } = await supabase
+      .from("entries")
+      .select("*")
+      .eq("user_id", uid)
+      .eq("date", date)
+      .order("created_at", { ascending: false });
+
+    setEntries((entryData ?? []) as Entry[]);
 
     const { data: insightData } = await supabase
       .from("daily_insights")
@@ -94,19 +165,98 @@ export default function CalendarPage() {
 
     }
 
+    setLoading(false);
+
   };
 
   useEffect(() => {
 
     if (!userId) return;
 
-    loadDay(userId, selectedDate);
+    fetchDay(userId, selectedDate);
 
   }, [userId, selectedDate]);
 
   /*
   -------------------------
-  SEND QUESTION
+  IMAGE UPLOAD
+  -------------------------
+  */
+
+  const uploadIfAny = async (uid: string, date: string) => {
+
+    if (!file) return null;
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+
+    const path = `${uid}/${date}/${crypto.randomUUID()}.${ext}`;
+
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, file);
+
+    if (error) throw error;
+
+    return path;
+
+  };
+
+  /*
+  -------------------------
+  SAVE ENTRY
+  -------------------------
+  */
+
+  const saveEntry = async () => {
+
+    if (!userId) return;
+
+    const hasText = note.trim().length > 0;
+    const hasImage = !!file;
+
+    if (!hasText && !hasImage) return;
+
+    setSaving(true);
+
+    try {
+
+      const imagePath = await uploadIfAny(userId, selectedDate);
+
+      const payload = {
+        user_id: userId,
+        date: selectedDate,
+        note: hasText ? note.trim() : null,
+        note_type: noteType,
+        meal_type: noteType === "meal" ? mealType : null,
+        image_url: imagePath,
+      };
+
+      const { error } = await supabase
+        .from("entries")
+        .insert(payload);
+
+      if (error) throw error;
+
+      setNote("");
+      setFile(null);
+
+      await fetchDay(userId, selectedDate);
+
+    } catch (e: any) {
+
+      setError(e.message);
+
+    } finally {
+
+      setSaving(false);
+
+    }
+
+  };
+
+  /*
+  -------------------------
+  CHAT
   -------------------------
   */
 
@@ -119,13 +269,12 @@ export default function CalendarPage() {
       message: question
     };
 
-    // optimistic update
     setDialogue(prev => [...prev, userMessage]);
 
     const q = question;
 
     setQuestion("");
-    setLoading(true);
+    setChatLoading(true);
 
     try {
 
@@ -156,7 +305,7 @@ export default function CalendarPage() {
 
     } finally {
 
-      setLoading(false);
+      setChatLoading(false);
 
     }
 
@@ -171,7 +320,6 @@ export default function CalendarPage() {
   const signOut = async () => {
 
     await supabase.auth.signOut();
-
     router.replace("/login");
 
   };
@@ -184,7 +332,7 @@ export default function CalendarPage() {
 
   return (
 
-    <div style={{ padding: 24, maxWidth: 700 }}>
+    <div style={{ padding: 24, maxWidth: 720 }}>
 
       <div style={{ display: "flex", alignItems: "center" }}>
         <h2>Calendar</h2>
@@ -195,9 +343,11 @@ export default function CalendarPage() {
         >
           Sign out
         </button>
+
       </div>
 
       <div style={{ marginTop: 16 }}>
+
         <input
           type="date"
           value={selectedDate}
@@ -205,6 +355,7 @@ export default function CalendarPage() {
             setSelectedDate(e.target.value)
           }
         />
+
       </div>
 
       {insight && (
@@ -230,7 +381,7 @@ export default function CalendarPage() {
       {insight && (
 
         <div style={{
-          marginTop: 20,
+          marginTop: 16,
           padding: 16,
           border: "1px solid #eee",
           borderRadius: 8
@@ -259,12 +410,10 @@ export default function CalendarPage() {
                   : "You"}
               </strong>
 
-              <p
-                style={{
-                  whiteSpace: "pre-wrap",
-                  marginTop: 4
-                }}
-              >
+              <p style={{
+                whiteSpace: "pre-wrap",
+                marginTop: 4
+              }}>
                 {m.message}
               </p>
 
@@ -277,24 +426,91 @@ export default function CalendarPage() {
             onChange={(e) =>
               setQuestion(e.target.value)
             }
-            placeholder="Ask a follow-up question..."
+            placeholder="Ask about today's insight..."
             style={{
               width: "100%",
-              minHeight: 70,
+              minHeight: 60,
               marginTop: 10
             }}
           />
 
           <button
             onClick={sendQuestion}
-            disabled={loading}
+            disabled={chatLoading}
             style={{ marginTop: 10 }}
           >
-            {loading ? "Thinking..." : "Ask"}
+            {chatLoading ? "Thinking..." : "Ask"}
           </button>
 
         </div>
 
+      )}
+
+      <textarea
+        ref={textareaRef}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        style={{ width: "100%", marginTop: 16 }}
+      />
+
+      <div style={{ marginTop: 10 }}>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) =>
+            setFile(e.target.files?.[0] ?? null)
+          }
+        />
+      </div>
+
+      <button
+        onClick={saveEntry}
+        disabled={saving}
+        style={{ marginTop: 12 }}
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+
+      {error && (
+        <p style={{ color: "red", marginTop: 10 }}>
+          {error}
+        </p>
+      )}
+
+      <h3 style={{ marginTop: 24 }}>
+        Entries for {selectedDate}
+      </h3>
+
+      {loading ? (
+        <p>Loading…</p>
+      ) : entries.length === 0 ? (
+        <p>No entries yet.</p>
+      ) : (
+        entries.map((e) => (
+
+          <div
+            key={e.id}
+            style={{
+              border: "1px solid #eee",
+              borderRadius: 8,
+              padding: 12,
+              marginTop: 10,
+            }}
+          >
+
+            {e.note && (
+              <p style={{ whiteSpace: "pre-wrap" }}>
+                {e.note}
+              </p>
+            )}
+
+            {e.image_url && (
+              <SignedImage path={e.image_url} />
+            )}
+
+          </div>
+
+        ))
       )}
 
     </div>
