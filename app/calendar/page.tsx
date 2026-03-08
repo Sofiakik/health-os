@@ -261,7 +261,7 @@ export default function CalendarPage() {
           <h3>Daily Insight</h3>
 
           <p style={{ whiteSpace: "pre-wrap" }}>
-            {insight.insight_text}
+            {insight.insight?.text}
           </p>
 
           <small>
