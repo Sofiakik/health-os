@@ -81,6 +81,10 @@ export default function CalendarPage() {
   const [chatReply, setChatReply] = useState<string | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
 
+  const [dialogue, setDialogue] = useState<
+  { role: string; message: string }[]
+>([]);
+
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getSession();
@@ -119,6 +123,22 @@ export default function CalendarPage() {
       .maybeSingle();
 
     setInsight(insightData ?? null);
+
+    if (insightData?.id) {
+
+      const { data: dialogueData } = await supabase
+        .from("insight_dialogue")
+        .select("role,message")
+        .eq("insight_id", insightData.id)
+        .order("created_at", { ascending: true });
+    
+      setDialogue(dialogueData ?? []);
+    
+    } else {
+    
+      setDialogue([]);
+    
+    }
 
     setLoading(false);
   };
