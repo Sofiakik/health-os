@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import heic2any from "heic2any";
 
 type NoteType = "meal" | "symptom" | "state";
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
