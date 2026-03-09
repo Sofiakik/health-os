@@ -106,6 +106,8 @@ export default function CalendarPage() {
 
   const loadDayData = async (uid: string, date: string) => {
 
+    console.log("LOAD DAY DATA", { uid, date });
+  
     setLoading(true);
 
     const { data: entryData } = await supabase
