@@ -150,10 +150,41 @@ async function createSignedImageUrl(path: string | null): Promise<string | null>
 }
 
 async function convertAndCompressImage(file: File): Promise<File> {
+  const lower = file.name.toLowerCase();
+  const isHeic =
+    file.type.includes("heic") ||
+    lower.endsWith(".heic") ||
+    lower.endsWith(".heif");
+
+  let blob: Blob = file;
+
+  if (isHeic) {
+    try {
+      const { default: heic2any } = await import("heic2any");
+
+      const converted = await heic2any({
+        blob: file,
+        toType: "image/jpeg",
+        quality: 0.9,
+      });
+
+      blob = Array.isArray(converted) ? converted[0] : converted;
+
+      if (!blob) {
+        throw new Error("HEIC conversion returned empty output.");
+      }
+    } catch (error) {
+      console.error("HEIC conversion failed", error);
+      throw new Error(
+        "This HEIC image could not be processed in the browser. Please convert it to JPG first or upload a PNG/JPG."
+      );
+    }
+  }
+
   let bitmap: ImageBitmap;
 
   try {
-    bitmap = await createImageBitmap(file);
+    bitmap = await createImageBitmap(blob);
   } catch (error) {
     console.error("createImageBitmap failed", error);
     throw new Error("Image decoding failed.");
