@@ -149,17 +149,15 @@ export default function CalendarPage() {
       resting_hr,
       strain,
       respiratory_rate,
-      skin_temperature,
-      created_at
+      skin_temperature
     `)
     .eq("user_id", uid)
-    .gte("date", date)
-    .lt("date", date + "T23:59:59")
-    .order("created_at", { ascending: false })
-    .limit(1)
+    .eq("date", date)
     .maybeSingle();
   
-  console.log("WHOOP DB result:", whoopData);
+  console.log("WHOOP query result:", whoopData, error);
+  
+  setWhoop(whoopData ?? null);
 
   if (!whoopData && date === today()) {
 
@@ -456,25 +454,31 @@ export default function CalendarPage() {
 
         <h3>WHOOP</h3>
 
-        {!whoop ? (
+       {!whoop ? (
 
-          <p>No WHOOP data</p>
+       <p>No WHOOP data</p>
 
-        ) : (
+       ) : (
 
-          <div>
+       <div>
 
-            <div>Sleep: {formatSleep(whoop.sleep_duration)}</div>
-            <div>Recovery: {whoop.recovery_score ?? "—"}</div>
-            <div>HRV: {whoop.hrv ?? "—"}</div>
-            <div>Resting HR: {whoop.resting_hr ?? "—"}</div>
-            <div>Strain: {whoop.strain ?? "—"}</div>
-            <div>Respiratory rate: {whoop.respiratory_rate ?? "—"}</div>
-            <div>Skin temperature: {whoop.skin_temperature ?? "—"}</div>
+      <div>Sleep: {formatSleep(whoop?.sleep_duration ?? null)}</div>
 
-          </div>
+      <div>Recovery: {whoop?.recovery_score ?? "—"}</div>
 
-        )}
+      <div>HRV: {whoop?.hrv ?? "—"}</div>
+
+      <div>Resting HR: {whoop?.resting_hr ?? "—"}</div>
+
+      <div>Strain: {whoop?.strain ?? "—"}</div>
+
+      <div>Respiratory rate: {whoop?.respiratory_rate ?? "—"}</div>
+
+      <div>Skin temperature: {whoop?.skin_temperature ?? "—"}</div>
+
+       </div>
+
+       )}
 
       </div>
 
