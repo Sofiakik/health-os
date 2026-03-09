@@ -53,11 +53,10 @@ function formatTime(ts: string) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatSleep(hours: number | string | null) {
+function formatSleep(hours: number | null) {
   if (!hours) return "—";
-  const value = Number(hours);
-  const h = Math.floor(value);
-  const m = Math.round((value - h) * 60);
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
   return `${h}h ${m}m`;
 }
 
