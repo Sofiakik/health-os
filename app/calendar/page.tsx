@@ -82,9 +82,8 @@ export default function CalendarPage() {
   const [chatLoading, setChatLoading] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  /* AUTH */
-
   useEffect(() => {
+
     const init = async () => {
 
       const { data } = await supabase.auth.getSession();
@@ -100,14 +99,11 @@ export default function CalendarPage() {
     };
 
     init();
-  }, [router]);
 
-  /* LOAD DATA */
+  }, [router]);
 
   const loadDayData = async (uid: string, date: string) => {
 
-    console.log("LOAD DAY DATA", { uid, date });
-  
     setLoading(true);
 
     const { data: entryData } = await supabase
@@ -139,86 +135,43 @@ export default function CalendarPage() {
       setDialogue(dialogueData ?? []);
 
     } else {
+
       setDialogue([]);
+
     }
 
-    const { data: whoopData, error } = await supabase
-    .from("daily_health_summary")
-    .select(`
-      sleep_duration,
-      recovery_score,
-      hrv,
-      resting_hr,
-      strain,
-      respiratory_rate,
-      skin_temperature
-    `)
-    .eq("user_id", uid)
-    .eq("date", date)
-    .maybeSingle();
-  
-  console.log("WHOOP query result:", whoopData, error);
-  
-  setWhoop(whoopData ?? null);
-
-  if (!whoopData && date === today()) {
-
-    console.log("No WHOOP data for today. Triggering ingestion...");
-  
-    try {
-  
-      await fetch("/api/whoop/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: uid
-        })
-      });
-  
-      // reload after ingestion
-      const { data: refreshed } = await supabase
-        .from("daily_health_summary")
-        .select(`
-          sleep_duration,
-          recovery_score,
-          hrv,
-          resting_hr,
-          strain,
-          respiratory_rate,
-          skin_temperature
-        `)
-        .eq("user_id", uid)
-        .gte("date", date)
-        .lt("date", date + "T23:59:59")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-  
-      setWhoop(refreshed ?? null);
-  
-    } catch (e) {
-  
-      console.error("WHOOP sync failed", e);
-  
-    }
-  
-  } else {
-  
-    setWhoop(whoopData ?? null);
-  
-  }
+    const { data: whoopData } = await supabase
+      .from("daily_health_summary")
+      .select(`
+        sleep_duration,
+        recovery_score,
+        hrv,
+        resting_hr,
+        strain,
+        respiratory_rate,
+        skin_temperature
+      `)
+      .eq("user_id", uid)
+      .eq("date", date)
+      .maybeSingle();
 
     setWhoop(whoopData ?? null);
 
     setLoading(false);
+
   };
 
   useEffect(() => {
+
     if (!userId) return;
+
     loadDayData(userId, selectedDate);
+
   }, [userId, selectedDate]);
 
-  /* IMAGE CONVERSION + COMPRESSION */
+  /*
+  HEIC → JPG + compression (~400kb)
+  */
 
   async function convertIfHeic(file: File): Promise<File> {
 
@@ -226,72 +179,61 @@ export default function CalendarPage() {
       file.type.includes("heic") ||
       file.name.toLowerCase().endsWith(".heic") ||
       file.name.toLowerCase().endsWith(".heif");
-  
-    if (!isHeic) return file;
-  
-    const blob = await heic2any({
-      blob: file,
-      toType: "image/jpeg",
-      quality: 0.9
-    });
-  
-    const convertedBlob = Array.isArray(blob) ? blob[0] : blob;
-  
-    return new File(
-      [convertedBlob],
-      `${crypto.randomUUID()}.jpg`,
-      { type: "image/jpeg" }
-    );
-  }
 
-    /* resize if large */
+    let blob: Blob;
 
-    const MAX_WIDTH = 1600;
+    if (isHeic) {
 
-    if (canvas.width > MAX_WIDTH) {
+      const converted = await heic2any({
+        blob: file,
+        toType: "image/jpeg",
+        quality: 0.9
+      });
 
-      const scale = MAX_WIDTH / canvas.width;
+      blob = Array.isArray(converted) ? converted[0] : converted;
 
-      const resized = document.createElement("canvas");
+    } else {
 
-      resized.width = canvas.width * scale;
-      resized.height = canvas.height * scale;
-
-      resized.getContext("2d")!.drawImage(
-        canvas,
-        0,
-        0,
-        resized.width,
-        resized.height
-      );
-
-      canvas = resized;
+      blob = file;
 
     }
 
-    /* compress progressively */
+    const img = await createImageBitmap(blob);
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d")!;
+
+    const MAX_WIDTH = 1600;
+
+    const scale = img.width > MAX_WIDTH
+      ? MAX_WIDTH / img.width
+      : 1;
+
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
     let quality = 0.9;
-    let blob: Blob | null = null;
+    let compressed: Blob | null = null;
 
     do {
 
-      blob = await new Promise((resolve) =>
+      compressed = await new Promise(resolve =>
         canvas.toBlob(resolve as any, "image/jpeg", quality)
       );
 
       quality -= 0.1;
 
-    } while (blob && blob.size > 450000 && quality > 0.3);
+    } while (compressed && compressed.size > 400000 && quality > 0.3);
 
     return new File(
-      [blob!],
+      [compressed!],
       `${crypto.randomUUID()}.jpg`,
       { type: "image/jpeg" }
     );
-  }
 
-  /* UPLOAD */
+  }
 
   const uploadImage = async (uid: string, date: string) => {
 
@@ -310,9 +252,8 @@ export default function CalendarPage() {
     if (error) throw error;
 
     return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/entry-images/${path}`;
-  };
 
-  /* SAVE ENTRY */
+  };
 
   const saveEntry = async () => {
 
@@ -353,16 +294,15 @@ export default function CalendarPage() {
       setSaving(false);
 
     }
-  };
 
-  /* CHAT */
+  };
 
   const sendQuestion = async () => {
 
     if (!question.trim() || !insight) return;
 
     const userMsg = { role: "user" as const, message: question };
-    setDialogue((d) => [...d, userMsg]);
+    setDialogue(d => [...d, userMsg]);
 
     const q = question;
     setQuestion("");
@@ -385,7 +325,7 @@ export default function CalendarPage() {
 
       const data = await res.json();
 
-      setDialogue((d) => [
+      setDialogue(d => [
         ...d,
         { role: "assistant", message: data.reply }
       ]);
@@ -395,6 +335,7 @@ export default function CalendarPage() {
       setChatLoading(false);
 
     }
+
   };
 
   const signOut = async () => {
@@ -404,9 +345,8 @@ export default function CalendarPage() {
 
   };
 
-  /* UI */
-
   return (
+
     <div style={{ maxWidth: 720, margin: "auto", padding: 24 }}>
 
       <div style={{ display: "flex", alignItems: "center" }}>
@@ -422,214 +362,28 @@ export default function CalendarPage() {
         onChange={(e) => setSelectedDate(e.target.value)}
       />
 
-      {/* WHOOP */}
-
       <div style={{ marginTop: 24 }}>
 
         <h3>WHOOP</h3>
 
-       {!whoop ? (
+        {!whoop ? (
 
-       <p>No WHOOP data</p>
-
-       ) : (
-
-       <div>
-
-      <div>Sleep: {formatSleep(whoop?.sleep_duration ?? null)}</div>
-
-      <div>Recovery: {whoop?.recovery_score ?? "—"}</div>
-
-      <div>HRV: {whoop?.hrv ?? "—"}</div>
-
-      <div>Resting HR: {whoop?.resting_hr ?? "—"}</div>
-
-      <div>Strain: {whoop?.strain ?? "—"}</div>
-
-      <div>Respiratory rate: {whoop?.respiratory_rate ?? "—"}</div>
-
-      <div>Skin temperature: {whoop?.skin_temperature ?? "—"}</div>
-
-       </div>
-
-       )}
-
-      </div>
-
-      {/* ADD ENTRY */}
-
-      <div style={{ marginTop: 24 }}>
-
-        <h3>Add entry</h3>
-
-        <select
-          value={noteType}
-          onChange={(e) => setNoteType(e.target.value as NoteType)}
-        >
-          <option value="meal">Meal</option>
-          <option value="symptom">Symptom</option>
-          <option value="state">State</option>
-        </select>
-
-        {noteType === "meal" && (
-
-          <select
-            value={mealType}
-            onChange={(e) => setMealType(e.target.value as MealType)}
-          >
-            <option value="breakfast">Breakfast</option>
-            <option value="lunch">Lunch</option>
-            <option value="dinner">Dinner</option>
-            <option value="snack">Snack</option>
-          </select>
-
-        )}
-
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Write note..."
-          style={{ width: "100%" }}
-        />
-
-        <input
-          type="file"
-          accept="image/*,.heic,.heif"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
-
-        <button onClick={saveEntry} disabled={saving}>
-          {saving ? "Saving..." : "Save entry"}
-        </button>
-
-      </div>
-
-      {/* ENTRIES */}
-
-      <div style={{ marginTop: 30 }}>
-
-        <h3>Entries</h3>
-
-        {loading ? (
-
-          <p>Loading...</p>
-
-        ) : entries.length === 0 ? (
-
-          <p>No entries</p>
+          <p>No WHOOP data</p>
 
         ) : (
 
-          entries.map((e) => (
+          <div>
 
-            <div
-              key={e.id}
-              style={{
-                border: "1px solid #eee",
-                padding: 12,
-                marginTop: 10,
-                borderRadius: 8
-              }}
-            >
+            <div>Sleep: {formatSleep(whoop.sleep_duration)}</div>
+            <div>Recovery: {whoop.recovery_score ?? "—"}</div>
+            <div>HRV: {whoop.hrv ?? "—"}</div>
+            <div>Resting HR: {whoop.resting_hr ?? "—"}</div>
+            <div>Strain: {whoop.strain ?? "—"}</div>
+            <div>Respiratory rate: {whoop.respiratory_rate ?? "—"}</div>
+            <div>Skin temperature: {whoop.skin_temperature ?? "—"}</div>
 
-              {e.note_type === "meal" && (
-                <strong>{e.meal_type}</strong>
-              )}
-
-              <div>{formatTime(e.created_at)}</div>
-
-              {e.note && (
-                <p style={{ whiteSpace: "pre-wrap" }}>{e.note}</p>
-              )}
-
-              {e.image_url && (
-                <img
-                  src={e.image_url}
-                  style={{ maxWidth: "100%", borderRadius: 8 }}
-                />
-              )}
-
-            </div>
-
-          ))
+          </div>
 
         )}
 
       </div>
-
-      {/* INSIGHT */}
-
-      <div style={{ marginTop: 30 }}>
-
-        <h3>Daily Insight</h3>
-
-        {insight ? (
-
-          <p style={{ whiteSpace: "pre-wrap" }}>
-            {insight.insight?.text}
-          </p>
-
-        ) : (
-
-          <p>No insight generated yet</p>
-
-        )}
-
-      </div>
-
-      {/* DIALOGUE */}
-
-      {insight && (
-
-        <div style={{ marginTop: 30 }}>
-
-          <h3>Conversation</h3>
-
-          {dialogue.map((m, i) => (
-
-            <div
-              key={i}
-              style={{
-                marginTop: 10,
-                padding: 10,
-                borderRadius: 6,
-                background:
-                  m.role === "assistant"
-                    ? "#f5f5f5"
-                    : "#e8f3ff"
-              }}
-            >
-
-              <strong>
-                {m.role === "assistant" ? "Assistant" : "You"}
-              </strong>
-
-              <p style={{ whiteSpace: "pre-wrap" }}>
-                {m.message}
-              </p>
-
-            </div>
-
-          ))}
-
-          <textarea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask about today's insight..."
-            style={{ width: "100%" }}
-          />
-
-          <button
-            onClick={sendQuestion}
-            disabled={chatLoading}
-          >
-            {chatLoading ? "Thinking..." : "Ask"}
-          </button>
-
-        </div>
-
-      )}
-
-    </div>
-  );
-}
