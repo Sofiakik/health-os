@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import libheif from "libheif-js";
+import heic2any from "heic2any";
 
 type NoteType = "meal" | "symptom" | "state";
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
@@ -226,51 +226,23 @@ export default function CalendarPage() {
       file.type.includes("heic") ||
       file.name.toLowerCase().endsWith(".heic") ||
       file.name.toLowerCase().endsWith(".heif");
-
-    let canvas = document.createElement("canvas");
-    let ctx = canvas.getContext("2d")!;
-
-    if (isHeic) {
-
-      const buffer = await file.arrayBuffer();
-      const decoder = new libheif.HeifDecoder();
-      const images = decoder.decode(buffer);
-
-      if (!images.length) throw new Error("HEIC decode failed");
-
-      const img = images[0];
-
-      const width = img.get_width();
-      const height = img.get_height();
-
-      canvas.width = width;
-      canvas.height = height;
-
-      const imageData = ctx.createImageData(width, height);
-
-      await new Promise<void>((resolve) => {
-
-        img.display(imageData, (data: Uint8ClampedArray) => {
-
-          imageData.data.set(data);
-          resolve();
-
-        });
-
-      });
-
-      ctx.putImageData(imageData, 0, 0);
-
-    } else {
-
-      const bitmap = await createImageBitmap(file);
-
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-
-      ctx.drawImage(bitmap, 0, 0);
-
-    }
+  
+    if (!isHeic) return file;
+  
+    const blob = await heic2any({
+      blob: file,
+      toType: "image/jpeg",
+      quality: 0.9
+    });
+  
+    const convertedBlob = Array.isArray(blob) ? blob[0] : blob;
+  
+    return new File(
+      [convertedBlob],
+      `${crypto.randomUUID()}.jpg`,
+      { type: "image/jpeg" }
+    );
+  }
 
     /* resize if large */
 
