@@ -159,28 +159,42 @@ async function convertAndCompressImage(file: File): Promise<File> {
   let blob: Blob = file;
 
   if (isHeic) {
-    const { default: heic2any } = await import("heic2any");
+    try {
+      const { default: heic2any } = await import("heic2any");
 
-    const converted = await heic2any({
-      blob: file,
-      toType: "image/jpeg",
-      quality: 0.9,
-    });
+      const converted = await heic2any({
+        blob: file,
+        toType: "image/jpeg",
+        quality: 0.9,
+      });
 
-    blob = Array.isArray(converted) ? converted[0] : converted;
+      blob = Array.isArray(converted) ? converted[0] : converted;
 
-    if (!blob) {
-      throw new Error("HEIC conversion failed");
+      if (!blob) {
+        throw new Error("HEIC conversion returned empty output.");
+      }
+    } catch (error) {
+      console.error("HEIC conversion failed", error);
+      throw new Error(
+        "This HEIC image could not be processed in the browser. Please convert it to JPG first or upload a PNG/JPG."
+      );
     }
   }
 
-  const bitmap = await createImageBitmap(blob);
+  let bitmap: ImageBitmap;
+
+  try {
+    bitmap = await createImageBitmap(blob);
+  } catch (error) {
+    console.error("createImageBitmap failed", error);
+    throw new Error("Image decoding failed.");
+  }
 
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
 
   if (!ctx) {
-    throw new Error("Could not create canvas context");
+    throw new Error("Could not create canvas context.");
   }
 
   const MAX_WIDTH = 1600;
@@ -202,7 +216,7 @@ async function convertAndCompressImage(file: File): Promise<File> {
   } while (compressed && compressed.size > 400_000 && quality > 0.3);
 
   if (!compressed) {
-    throw new Error("Image compression failed");
+    throw new Error("Image compression failed.");
   }
 
   return new File([compressed], `${crypto.randomUUID()}.jpg`, {
@@ -472,7 +486,12 @@ export default function CalendarPage() {
       await loadDayData(userId, selectedDate);
     } catch (err) {
       console.error("saveEntry failed", err);
-      setPageError("Failed to save entry.");
+
+      if (err instanceof Error) {
+        setPageError(err.message);
+      } else {
+        setPageError("Failed to save entry.");
+      }
     } finally {
       setSaving(false);
     }
@@ -530,7 +549,22 @@ export default function CalendarPage() {
   };
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setFile(e.target.files?.[0] ?? null);
+    const nextFile = e.target.files?.[0] ?? null;
+    setFile(nextFile);
+  
+    if (nextFile) {
+      const lower = nextFile.name.toLowerCase();
+      const isHeic =
+        nextFile.type.includes("heic") ||
+        lower.endsWith(".heic") ||
+        lower.endsWith(".heif");
+  
+      if (isHeic) {
+        setPageError(
+          "HEIC upload is being converted in the browser. If this fails, convert the image to JPG and retry."
+        );
+      }
+    }
   };
 
   return (
