@@ -224,49 +224,6 @@ async function convertAndCompressImage(file: File): Promise<File> {
   });
 }
 
-  let bitmap: ImageBitmap;
-
-  try {
-    bitmap = await createImageBitmap(blob);
-  } catch (error) {
-    console.error("createImageBitmap failed", error);
-    throw new Error("Image decoding failed.");
-  }
-
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-
-  if (!ctx) {
-    throw new Error("Could not create canvas context.");
-  }
-
-  const MAX_WIDTH = 1600;
-  const scale = bitmap.width > MAX_WIDTH ? MAX_WIDTH / bitmap.width : 1;
-
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-
-  let quality = 0.9;
-  let compressed: Blob | null = null;
-
-  do {
-    compressed = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", quality)
-    );
-    quality -= 0.1;
-  } while (compressed && compressed.size > 400_000 && quality > 0.3);
-
-  if (!compressed) {
-    throw new Error("Image compression failed.");
-  }
-
-  return new File([compressed], `${crypto.randomUUID()}.jpg`, {
-    type: "image/jpeg",
-  });
-}
-
 export default function CalendarPage() {
   const router = useRouter();
 
