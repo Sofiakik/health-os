@@ -150,36 +150,48 @@ async function createSignedImageUrl(path: string | null): Promise<string | null>
 }
 
 async function convertAndCompressImage(file: File): Promise<File> {
-  const lower = file.name.toLowerCase();
-  const isHeic =
-    file.type.includes("heic") ||
-    lower.endsWith(".heic") ||
-    lower.endsWith(".heif");
+  let bitmap: ImageBitmap;
 
-  let blob: Blob = file;
-
-  if (isHeic) {
-    try {
-      const { default: heic2any } = await import("heic2any");
-
-      const converted = await heic2any({
-        blob: file,
-        toType: "image/jpeg",
-        quality: 0.9,
-      });
-
-      blob = Array.isArray(converted) ? converted[0] : converted;
-
-      if (!blob) {
-        throw new Error("HEIC conversion returned empty output.");
-      }
-    } catch (error) {
-      console.error("HEIC conversion failed", error);
-      throw new Error(
-        "This HEIC image could not be processed in the browser. Please convert it to JPG first or upload a PNG/JPG."
-      );
-    }
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch (error) {
+    console.error("createImageBitmap failed", error);
+    throw new Error("Image decoding failed.");
   }
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) {
+    throw new Error("Could not create canvas context.");
+  }
+
+  const MAX_WIDTH = 1600;
+  const scale = bitmap.width > MAX_WIDTH ? MAX_WIDTH / bitmap.width : 1;
+
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+  let quality = 0.9;
+  let compressed: Blob | null = null;
+
+  do {
+    compressed = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", quality)
+    );
+    quality -= 0.1;
+  } while (compressed && compressed.size > 400_000 && quality > 0.3);
+
+  if (!compressed) {
+    throw new Error("Image compression failed.");
+  }
+
+  return new File([compressed], `${crypto.randomUUID()}.jpg`, {
+    type: "image/jpeg",
+  });
+}
 
   let bitmap: ImageBitmap;
 
@@ -550,21 +562,29 @@ export default function CalendarPage() {
 
   const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const nextFile = e.target.files?.[0] ?? null;
-    setFile(nextFile);
   
-    if (nextFile) {
-      const lower = nextFile.name.toLowerCase();
-      const isHeic =
-        nextFile.type.includes("heic") ||
-        lower.endsWith(".heic") ||
-        lower.endsWith(".heif");
-  
-      if (isHeic) {
-        setPageError(
-          "HEIC upload is being converted in the browser. If this fails, convert the image to JPG and retry."
-        );
-      }
+    if (!nextFile) {
+      setFile(null);
+      return;
     }
+  
+    const lower = nextFile.name.toLowerCase();
+    const isHeic =
+      nextFile.type.includes("heic") ||
+      lower.endsWith(".heic") ||
+      lower.endsWith(".heif");
+  
+    if (isHeic) {
+      setFile(null);
+      setPageError(
+        "HEIC files are not supported yet. Please convert the image to JPG or PNG before uploading."
+      );
+      e.target.value = "";
+      return;
+    }
+  
+    setPageError(null);
+    setFile(nextFile);
   };
 
   return (
@@ -691,8 +711,13 @@ export default function CalendarPage() {
                 onChange={onFileChange}
               />
             </div>
+
             <div style={{ marginTop: 4, fontSize: 12, opacity: 0.75 }}>
               {fileLabel}
+            </div>
+
+            <div style={{ marginTop: 4, fontSize: 12, opacity: 0.75 }}>
+              iPhone uploads are supported. If a specific HEIC fails, convert it to JPG and retry.
             </div>
           </label>
 
