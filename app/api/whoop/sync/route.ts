@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const WHOOP_API = "https://api.prod.whoop.com/developer/v1";
+const WHOOP_API = "https://api.prod.whoop.com/developer/v2";
 
 async function refreshTokenIfNeeded(tokenRow: any) {
   const now = new Date();
@@ -63,6 +63,12 @@ async function fetchWhoop(endpoint: string, token: string) {
     },
   });
 
+  if (!res.ok) {
+    const body = await res.text();
+    console.error("[whoop sync] non-OK response", res.status, res.statusText, endpoint, body);
+    throw new Error(body || `WHOOP API ${res.status} ${res.statusText}`);
+  }
+
   return res.json();
 }
 
@@ -82,8 +88,8 @@ export async function GET() {
 
     const cycles = await fetchWhoop("/cycle", accessToken);
     const recoveries = await fetchWhoop("/recovery", accessToken);
-    const sleeps = await fetchWhoop("/sleep", accessToken);
-    const workouts = await fetchWhoop("/workout", accessToken);
+    const sleeps = await fetchWhoop("/activity/sleep", accessToken);
+    const workouts = await fetchWhoop("/activity/workout", accessToken);
 
     return NextResponse.json({
       success: true,
