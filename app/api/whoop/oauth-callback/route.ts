@@ -29,6 +29,16 @@ export async function GET(req: Request) {
 
   const tokens = await tokenRes.json();
 
+  // Temporary safe logging: do not log token values
+  const keys = Object.keys(tokens ?? {});
+  const refreshRelated = keys.filter((k) => /refresh/i.test(k));
+  console.log("[whoop oauth-callback] token response keys:", keys);
+  console.log("[whoop oauth-callback] access_token exists:", "access_token" in (tokens ?? {}));
+  console.log("[whoop oauth-callback] refresh_token exists:", "refresh_token" in (tokens ?? {}));
+  console.log("[whoop oauth-callback] expires_in:", tokens?.expires_in);
+  console.log("[whoop oauth-callback] token_type:", tokens?.token_type);
+  console.log("[whoop oauth-callback] refresh-related keys:", refreshRelated);
+
   if (!tokens.access_token) {
     return NextResponse.json({
       error: "Token exchange failed",
@@ -44,17 +54,20 @@ export async function GET(req: Request) {
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
   const { error } = await supabase
-  .from("whoop_tokens")
-  .upsert(
-    {
+    .from("whoop_tokens")
+    .insert({
       user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token ?? null,
       expires_at: expiresAt.toISOString(),
-      updated_at: new Date().toISOString()
-    },
-    { onConflict: "user_id" }
-  );
+    });
+
+  if (error) {
+    return NextResponse.json({
+      error: "Supabase insert failed",
+      details: error
+    });
+  }
 
   return NextResponse.redirect(
     `${process.env.NEXT_PUBLIC_APP_URL}/calendar`
