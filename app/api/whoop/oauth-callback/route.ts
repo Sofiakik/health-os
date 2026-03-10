@@ -29,6 +29,17 @@ export async function GET(req: Request) {
 
   const tokens = await tokenRes.json();
 
+  // Temporary safe logging: do not log token values
+  const keys = Object.keys(tokens ?? {});
+  const refreshKeys = keys.filter((k) => /refresh/i.test(k));
+  console.log("[whoop oauth-callback] token keys:", keys);
+  console.log("[whoop oauth-callback] access_token exists:", "access_token" in (tokens ?? {}));
+  console.log("[whoop oauth-callback] refresh_token exists:", "refresh_token" in (tokens ?? {}));
+  console.log("[whoop oauth-callback] refresh_token length:", typeof tokens?.refresh_token === "string" ? tokens.refresh_token.length : null);
+  console.log("[whoop oauth-callback] expires_in:", tokens?.expires_in);
+  console.log("[whoop oauth-callback] token_type:", tokens?.token_type);
+  console.log("[whoop oauth-callback] top-level keys containing 'refresh':", refreshKeys);
+
   if (!tokens.access_token) {
     return NextResponse.json({
       error: "Token exchange failed",
