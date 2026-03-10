@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com"
+    },
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=sxqhflbqplbovodkgfyk",
+      "disabledTools": [
+        "execute_sql",
+        "apply_migration",
+        "deploy_edge_function",
+        "update_storage_config",
+        "create_branch",
+        "delete_branch",
+        "merge_branch",
+        "reset_branch",
+        "rebase_branch"
+      ]
+    }
+  }
+}

@@ -222,7 +222,6 @@ async function convertAndCompressImage(file: File): Promise<File> {
   return new File([compressed], `${crypto.randomUUID()}.jpg`, {
     type: "image/jpeg",
   });
-}
 
 export default function CalendarPage() {
   const router = useRouter();

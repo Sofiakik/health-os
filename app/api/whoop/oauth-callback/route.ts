@@ -52,19 +52,24 @@ export async function GET(req: Request) {
   );
 
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+  const nowIso = new Date().toISOString();
 
   const { error } = await supabase
     .from("whoop_tokens")
-    .insert({
-      user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token ?? null,
-      expires_at: expiresAt.toISOString(),
-    });
+    .upsert(
+      {
+        user_id: "d677b416-3e41-4739-9eb2-3fe3231b7bd7",
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token ?? null,
+        expires_at: expiresAt.toISOString(),
+        updated_at: nowIso,
+      },
+      { onConflict: "user_id" }
+    );
 
   if (error) {
     return NextResponse.json({
-      error: "Supabase insert failed",
+      error: "Supabase upsert failed",
       details: error
     });
   }
