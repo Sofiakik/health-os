@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,15 +8,15 @@ const supabase = createClient(
 
 const WHOOP_API = "https://api.prod.whoop.com/developer/v2";
 
-async function refreshTokenIfNeeded(tokenRow: any): Promise<{
-  accessToken: string;
-  refreshed: boolean;
-  refreshStatus: number | null;
-  refreshTokenMd5Before: string | null;
-  refreshTokenMd5After: string | null;
-  refreshResponseKeys: string[] | null;
-  refreshTokenInResponse: boolean | null;
-}> {
+function shouldRefreshToken(tokenRow: any, now: Date): boolean {
+  const refreshWindowMs = 5 * 60 * 1000; // 5 minutes
+  if (!tokenRow?.expires_at) return false;
+  const expiresAtMs = new Date(tokenRow.expires_at).getTime();
+  if (Number.isNaN(expiresAtMs)) return false;
+  return expiresAtMs - now.getTime() <= refreshWindowMs;
+}
+
+async function refreshTokenIfNeeded(tokenRow: any): Promise<string> {
   const now = new Date();
   const refreshWindowMs = 5 * 60 * 1000; // 5 minutes
 
@@ -26,27 +25,12 @@ async function refreshTokenIfNeeded(tokenRow: any): Promise<{
     !tokenRow.expires_at ||
     new Date(tokenRow.expires_at).getTime() - now.getTime() > refreshWindowMs
   ) {
-    return {
-      accessToken: tokenRow.access_token,
-      refreshed: false,
-      refreshStatus: null,
-      refreshTokenMd5Before: null,
-      refreshTokenMd5After: null,
-      refreshResponseKeys: null,
-      refreshTokenInResponse: null,
-    };
+    return tokenRow.access_token;
   }
 
   if (!tokenRow.refresh_token) {
     throw new Error("No refresh token available");
   }
-
-  // TEMP: log refresh_token hash before/after refresh (never log token values)
-  const refreshTokenHashBefore = crypto
-    .createHash("md5")
-    .update(String(tokenRow.refresh_token))
-    .digest("hex");
-  console.log("[whoop sync] refresh_token md5 BEFORE refresh:", refreshTokenHashBefore);
 
   const res = await fetch(
     "https://api.prod.whoop.com/oauth/oauth2/token",
@@ -65,17 +49,6 @@ async function refreshTokenIfNeeded(tokenRow: any): Promise<{
   );
 
   const tokens = await res.json();
-  const refreshResponseKeys = Object.keys(tokens ?? {});
-  const refreshTokenInResponse = "refresh_token" in (tokens ?? {});
-  console.log("[whoop sync] token refresh response keys:", refreshResponseKeys);
-  console.log("[whoop sync] refresh_token present in response:", refreshTokenInResponse);
-
-  const refreshTokenAfter = tokens?.refresh_token ?? tokenRow.refresh_token;
-  const refreshTokenHashAfter = crypto
-    .createHash("md5")
-    .update(String(refreshTokenAfter))
-    .digest("hex");
-  console.log("[whoop sync] refresh_token md5 AFTER refresh:", refreshTokenHashAfter);
 
   if (!tokens.access_token) {
     throw new Error("WHOOP token refresh failed");
@@ -93,15 +66,9 @@ async function refreshTokenIfNeeded(tokenRow: any): Promise<{
     })
     .eq("user_id", tokenRow.user_id);
 
-  return {
-    accessToken: tokens.access_token,
-    refreshed: true,
-    refreshStatus: res.status,
-    refreshTokenMd5Before: refreshTokenHashBefore,
-    refreshTokenMd5After: refreshTokenHashAfter,
-    refreshResponseKeys,
-    refreshTokenInResponse,
-  };
+  console.log("[whoop sync] refreshed WHOOP access token");
+
+  return tokens.access_token;
 }
 
 async function fetchWhoop(endpoint: string, token: string) {
@@ -237,10 +204,10 @@ export async function GET() {
       return NextResponse.json({ error: "No WHOOP token stored" });
     }
 
-    // TEMP: force refresh path by making token appear expired.
-    const tokenRowForced = { ...tokenRow, expires_at: new Date(0).toISOString() };
-    const tokenInfo = await refreshTokenIfNeeded(tokenRowForced);
-    const accessToken = tokenInfo.accessToken;
+    const tokenRefreshed = shouldRefreshToken(tokenRow, new Date());
+    console.log("[whoop sync] token_refreshed:", tokenRefreshed);
+
+    const accessToken = await refreshTokenIfNeeded(tokenRow);
 
     const cycles = await fetchWhoop("/cycle", accessToken);
     const recoveries = await fetchWhoop("/recovery", accessToken);
@@ -251,6 +218,9 @@ export async function GET() {
     const recoveryRecords = recoveries?.records ?? [];
     const sleepRecords = sleeps?.records ?? [];
     const workoutRecords = workouts?.records ?? [];
+    const whoopRecordsFetched =
+      cycleRecords.length + recoveryRecords.length + sleepRecords.length + workoutRecords.length;
+    console.log("[whoop sync] whoop_records_fetched:", whoopRecordsFetched);
 
     const userId = tokenRow.user_id as string;
 
@@ -291,6 +261,81 @@ export async function GET() {
       }
     }
 
+    // Aggregate WHOOP metrics into daily_health_summary for each affected “WHOOP day”.
+    if (metricRows.length > 0) {
+      const { data: dateRows, error: dateError } = await supabase
+        .from("health_metrics")
+        .select("metric_timestamp")
+        .eq("user_id", userId)
+        .eq("source", "whoop")
+        .in(
+          "metric_type",
+          Array.from(
+            new Set(metricRows.map((r) => r.metric_type).filter(Boolean))
+          )
+        )
+        .gte(
+          "metric_timestamp",
+          new Date(
+            Math.min(
+              ...metricRows.map((r) => new Date(r.metric_timestamp).getTime())
+            )
+          ).toISOString()
+        )
+        .lte(
+          "metric_timestamp",
+          new Date(
+            Math.max(
+              ...metricRows.map((r) => new Date(r.metric_timestamp).getTime())
+            )
+          ).toISOString()
+        );
+
+      if (dateError) {
+        console.error("[whoop sync] failed to fetch affected dates for aggregation", dateError);
+      } else {
+        const allTimestamps = (dateRows ?? [])
+          .map((row: any) => row.metric_timestamp)
+          .filter(Boolean)
+          .map((ts: string) => new Date(ts));
+
+        const uniqueDates = Array.from(
+          new Set(
+            allTimestamps.map((d) => d.toISOString().slice(0, 10)) // YYYY-MM-DD UTC; actual WHOOP day mapping happens in SQL
+          )
+        );
+
+        console.log(
+          "[whoop sync] daily aggregation dates_count:",
+          uniqueDates.length,
+          "example_date:",
+          uniqueDates[0] ?? null
+        );
+
+        for (const d of uniqueDates) {
+          try {
+            const { error: aggError } = await supabase.rpc(
+              "upsert_daily_health_summary_whoop",
+              { p_user_id: userId, p_date: d }
+            );
+            if (aggError) {
+              console.error(
+                "[whoop sync] daily aggregation failed for date",
+                d,
+                aggError
+              );
+            }
+          } catch (e) {
+            console.error(
+              "[whoop sync] unexpected error during daily aggregation for date",
+              d,
+              e
+            );
+          }
+        }
+      }
+    }
+
     let summaryTriggered = false;
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
     if (baseUrl) {
@@ -304,12 +349,6 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      token_refreshed: tokenInfo.refreshed,
-      token_refresh_status: tokenInfo.refreshStatus,
-      refresh_token_md5_before: tokenInfo.refreshTokenMd5Before,
-      refresh_token_md5_after: tokenInfo.refreshTokenMd5After,
-      token_refresh_response_keys: tokenInfo.refreshResponseKeys,
-      token_refresh_response_has_refresh_token: tokenInfo.refreshTokenInResponse,
       cycles: cycleRecords.length,
       recoveries: recoveryRecords.length,
       sleeps: sleepRecords.length,
