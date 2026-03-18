@@ -10,7 +10,15 @@ const WHOOP_API = "https://api.prod.whoop.com/developer/v2";
 
 async function refreshTokenIfNeeded(tokenRow: any) {
   const now = new Date();
-  // TEMP: force refresh on every sync run (ignore expires_at)
+  const refreshWindowMs = 5 * 60 * 1000; // 5 minutes
+
+  // Refresh only when the token is expired or will expire soon.
+  if (
+    !tokenRow.expires_at ||
+    new Date(tokenRow.expires_at).getTime() - now.getTime() > refreshWindowMs
+  ) {
+    return tokenRow.access_token;
+  }
 
   if (!tokenRow.refresh_token) {
     throw new Error("No refresh token available");
@@ -33,12 +41,6 @@ async function refreshTokenIfNeeded(tokenRow: any) {
   );
 
   const tokens = await res.json();
-
-  console.log("[whoop sync] refresh request executed:", true);
-  console.log("[whoop sync] token refresh status:", res.status);
-  console.log("[whoop sync] refresh response keys:", Object.keys(tokens ?? {}));
-  console.log("[whoop sync] refresh access_token exists:", "access_token" in (tokens ?? {}));
-  console.log("[whoop sync] refresh refresh_token exists:", "refresh_token" in (tokens ?? {}));
 
   if (!tokens.access_token) {
     throw new Error("WHOOP token refresh failed");
@@ -182,11 +184,6 @@ function buildHealthMetrics(
 
 export async function GET() {
   try {
-    let tokenRefreshAttempted = false;
-    let tokenRefreshStatus: number | null = null;
-    let tokenRefreshAccessTokenPresent: boolean | null = null;
-    let tokenRefreshRefreshTokenPresent: boolean | null = null;
-
     const { data: tokenRow } = await supabase
       .from("whoop_tokens")
       .select("*")
@@ -197,45 +194,7 @@ export async function GET() {
       return NextResponse.json({ error: "No WHOOP token stored" });
     }
 
-    tokenRefreshAttempted = true;
-    const refreshRes = await fetch("https://api.prod.whoop.com/oauth/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: tokenRow.refresh_token,
-        client_id: process.env.WHOOP_CLIENT_ID!,
-        client_secret: process.env.WHOOP_CLIENT_SECRET!,
-      }),
-    });
-    tokenRefreshStatus = refreshRes.status;
-    const refreshedTokens = await refreshRes.json();
-    tokenRefreshAccessTokenPresent = "access_token" in (refreshedTokens ?? {});
-    tokenRefreshRefreshTokenPresent = "refresh_token" in (refreshedTokens ?? {});
-
-    console.log("[whoop sync] refresh request executed:", true);
-    console.log("[whoop sync] token refresh status:", tokenRefreshStatus);
-    console.log("[whoop sync] refresh response keys:", Object.keys(refreshedTokens ?? {}));
-    console.log("[whoop sync] refresh access_token exists:", tokenRefreshAccessTokenPresent);
-    console.log("[whoop sync] refresh refresh_token exists:", tokenRefreshRefreshTokenPresent);
-
-    if (!refreshedTokens?.access_token) {
-      throw new Error("WHOOP token refresh failed");
-    }
-
-    const expiresAt = new Date(Date.now() + refreshedTokens.expires_in * 1000);
-
-    await supabase
-      .from("whoop_tokens")
-      .update({
-        access_token: refreshedTokens.access_token,
-        refresh_token: refreshedTokens.refresh_token ?? tokenRow.refresh_token,
-        expires_at: expiresAt.toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("user_id", tokenRow.user_id);
-
-    const accessToken = refreshedTokens.access_token as string;
+    const accessToken = await refreshTokenIfNeeded(tokenRow);
 
     const cycles = await fetchWhoop("/cycle", accessToken);
     const recoveries = await fetchWhoop("/recovery", accessToken);
@@ -299,10 +258,6 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      token_refresh_attempted: tokenRefreshAttempted,
-      token_refresh_status: tokenRefreshStatus,
-      token_refresh_access_token_present: tokenRefreshAccessTokenPresent,
-      token_refresh_refresh_token_present: tokenRefreshRefreshTokenPresent,
       cycles: cycleRecords.length,
       recoveries: recoveryRecords.length,
       sleeps: sleepRecords.length,
