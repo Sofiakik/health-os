@@ -9,7 +9,13 @@ const supabase = createClient(
 
 const WHOOP_API = "https://api.prod.whoop.com/developer/v2";
 
-async function refreshTokenIfNeeded(tokenRow: any) {
+async function refreshTokenIfNeeded(tokenRow: any): Promise<{
+  accessToken: string;
+  refreshed: boolean;
+  refreshStatus: number | null;
+  refreshTokenMd5Before: string | null;
+  refreshTokenMd5After: string | null;
+}> {
   const now = new Date();
   const refreshWindowMs = 5 * 60 * 1000; // 5 minutes
 
@@ -18,7 +24,13 @@ async function refreshTokenIfNeeded(tokenRow: any) {
     !tokenRow.expires_at ||
     new Date(tokenRow.expires_at).getTime() - now.getTime() > refreshWindowMs
   ) {
-    return tokenRow.access_token;
+    return {
+      accessToken: tokenRow.access_token,
+      refreshed: false,
+      refreshStatus: null,
+      refreshTokenMd5Before: null,
+      refreshTokenMd5After: null,
+    };
   }
 
   if (!tokenRow.refresh_token) {
@@ -73,7 +85,13 @@ async function refreshTokenIfNeeded(tokenRow: any) {
     })
     .eq("user_id", tokenRow.user_id);
 
-  return tokens.access_token;
+  return {
+    accessToken: tokens.access_token,
+    refreshed: true,
+    refreshStatus: res.status,
+    refreshTokenMd5Before: refreshTokenHashBefore,
+    refreshTokenMd5After: refreshTokenHashAfter,
+  };
 }
 
 async function fetchWhoop(endpoint: string, token: string) {
@@ -209,7 +227,10 @@ export async function GET() {
       return NextResponse.json({ error: "No WHOOP token stored" });
     }
 
-    const accessToken = await refreshTokenIfNeeded(tokenRow);
+    // TEMP: force refresh path by making token appear expired.
+    const tokenRowForced = { ...tokenRow, expires_at: new Date(0).toISOString() };
+    const tokenInfo = await refreshTokenIfNeeded(tokenRowForced);
+    const accessToken = tokenInfo.accessToken;
 
     const cycles = await fetchWhoop("/cycle", accessToken);
     const recoveries = await fetchWhoop("/recovery", accessToken);
@@ -273,6 +294,10 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
+      token_refreshed: tokenInfo.refreshed,
+      token_refresh_status: tokenInfo.refreshStatus,
+      refresh_token_md5_before: tokenInfo.refreshTokenMd5Before,
+      refresh_token_md5_after: tokenInfo.refreshTokenMd5After,
       cycles: cycleRecords.length,
       recoveries: recoveryRecords.length,
       sleeps: sleepRecords.length,
