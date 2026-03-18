@@ -247,6 +247,17 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
+  const [mealBatchLoading, setMealBatchLoading] = useState<boolean>(false);
+  const [mealBatchResult, setMealBatchResult] = useState<{
+    processed_count: number;
+    skipped_count: number;
+    errors?: unknown;
+    ok?: boolean;
+    results?: Array<{ entry_id: string; status: string; reason?: string }>;
+  } | null>(null);
+  const [mealBatchError, setMealBatchError] = useState<string | null>(null);
+  const [mealBatchAutoRan, setMealBatchAutoRan] = useState<boolean>(false);
+
   const fileLabel = useMemo(() => file?.name ?? "No file selected", [file]);
 
   useEffect(() => {
@@ -414,6 +425,58 @@ export default function CalendarPage() {
     if (!userId) return;
     void loadDayData(userId, selectedDate);
   }, [userId, selectedDate]);
+
+  const processMealsBatch = async () => {
+    setMealBatchLoading(true);
+    setMealBatchError(null);
+    setMealBatchResult(null);
+
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (!accessToken) throw new Error("No active Supabase session");
+
+      const res = await fetch("/api/entries/process-meals-batch", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({}),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error ?? `Request failed with ${res.status}`);
+      }
+
+      setMealBatchResult({
+        processed_count: json.processed_count ?? 0,
+        skipped_count: json.skipped_count ?? 0,
+        errors: json.errors ?? json.error ?? null,
+        ok: json.ok,
+        results: json.results ?? [],
+      });
+    } catch (e: any) {
+      setMealBatchError(e?.message ?? "Meal batch processing failed");
+    } finally {
+      setMealBatchLoading(false);
+    }
+  };
+
+  // Optional debug trigger:
+  // - open /calendar?processMealsBatch=1 to run once for the current session
+  useEffect(() => {
+    if (!userId) return;
+    if (mealBatchAutoRan) return;
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("processMealsBatch") !== "1") return;
+
+    setMealBatchAutoRan(true);
+    void processMealsBatch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, mealBatchAutoRan]);
 
   const uploadImage = async (
     uid: string,
@@ -719,6 +782,39 @@ export default function CalendarPage() {
 
       <section style={{ marginTop: 32 }}>
         <h3>Entries</h3>
+
+        <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
+          <button
+            onClick={() => void processMealsBatch()}
+            disabled={mealBatchLoading}
+            style={{ opacity: mealBatchLoading ? 0.7 : 1 }}
+          >
+            {mealBatchLoading ? "Processing meals..." : "Process meal nutrition (LLM)"}
+          </button>
+          <span style={{ fontSize: 12, opacity: 0.7 }}>
+            Runs on meals with missing/low-confidence nutrition.
+          </span>
+        </div>
+
+        {mealBatchError ? (
+          <div style={{ marginTop: 10, color: "#b00020" }}>Meal batch error: {mealBatchError}</div>
+        ) : null}
+
+        {mealBatchResult ? (
+          <div style={{ marginTop: 10, fontSize: 13, opacity: 0.9 }}>
+            Meal batch result: processed_count={mealBatchResult.processed_count}, skipped_count=
+            {mealBatchResult.skipped_count}
+
+            {mealBatchResult.results && mealBatchResult.results.length > 0 ? (
+              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                Results (first {Math.min(10, mealBatchResult.results.length)}):
+                <pre style={{ margin: "8px 0 0 0", whiteSpace: "pre-wrap" }}>
+                  {JSON.stringify(mealBatchResult.results.slice(0, 10), null, 2)}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {loading ? (
           <p>Loading...</p>
