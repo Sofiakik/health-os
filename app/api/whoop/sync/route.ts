@@ -15,6 +15,8 @@ async function refreshTokenIfNeeded(tokenRow: any): Promise<{
   refreshStatus: number | null;
   refreshTokenMd5Before: string | null;
   refreshTokenMd5After: string | null;
+  refreshResponseKeys: string[] | null;
+  refreshTokenInResponse: boolean | null;
 }> {
   const now = new Date();
   const refreshWindowMs = 5 * 60 * 1000; // 5 minutes
@@ -30,6 +32,8 @@ async function refreshTokenIfNeeded(tokenRow: any): Promise<{
       refreshStatus: null,
       refreshTokenMd5Before: null,
       refreshTokenMd5After: null,
+      refreshResponseKeys: null,
+      refreshTokenInResponse: null,
     };
   }
 
@@ -61,6 +65,10 @@ async function refreshTokenIfNeeded(tokenRow: any): Promise<{
   );
 
   const tokens = await res.json();
+  const refreshResponseKeys = Object.keys(tokens ?? {});
+  const refreshTokenInResponse = "refresh_token" in (tokens ?? {});
+  console.log("[whoop sync] token refresh response keys:", refreshResponseKeys);
+  console.log("[whoop sync] refresh_token present in response:", refreshTokenInResponse);
 
   const refreshTokenAfter = tokens?.refresh_token ?? tokenRow.refresh_token;
   const refreshTokenHashAfter = crypto
@@ -91,6 +99,8 @@ async function refreshTokenIfNeeded(tokenRow: any): Promise<{
     refreshStatus: res.status,
     refreshTokenMd5Before: refreshTokenHashBefore,
     refreshTokenMd5After: refreshTokenHashAfter,
+    refreshResponseKeys,
+    refreshTokenInResponse,
   };
 }
 
@@ -298,6 +308,8 @@ export async function GET() {
       token_refresh_status: tokenInfo.refreshStatus,
       refresh_token_md5_before: tokenInfo.refreshTokenMd5Before,
       refresh_token_md5_after: tokenInfo.refreshTokenMd5After,
+      token_refresh_response_keys: tokenInfo.refreshResponseKeys,
+      token_refresh_response_has_refresh_token: tokenInfo.refreshTokenInResponse,
       cycles: cycleRecords.length,
       recoveries: recoveryRecords.length,
       sleeps: sleepRecords.length,
