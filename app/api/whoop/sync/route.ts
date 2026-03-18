@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import crypto from "crypto";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,6 +25,13 @@ async function refreshTokenIfNeeded(tokenRow: any) {
     throw new Error("No refresh token available");
   }
 
+  // TEMP: log refresh_token hash before/after refresh (never log token values)
+  const refreshTokenHashBefore = crypto
+    .createHash("md5")
+    .update(String(tokenRow.refresh_token))
+    .digest("hex");
+  console.log("[whoop sync] refresh_token md5 BEFORE refresh:", refreshTokenHashBefore);
+
   const res = await fetch(
     "https://api.prod.whoop.com/oauth/oauth2/token",
     {
@@ -41,6 +49,13 @@ async function refreshTokenIfNeeded(tokenRow: any) {
   );
 
   const tokens = await res.json();
+
+  const refreshTokenAfter = tokens?.refresh_token ?? tokenRow.refresh_token;
+  const refreshTokenHashAfter = crypto
+    .createHash("md5")
+    .update(String(refreshTokenAfter))
+    .digest("hex");
+  console.log("[whoop sync] refresh_token md5 AFTER refresh:", refreshTokenHashAfter);
 
   if (!tokens.access_token) {
     throw new Error("WHOOP token refresh failed");
