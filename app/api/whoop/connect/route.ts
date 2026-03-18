@@ -12,7 +12,7 @@ export async function GET() {
     response_type: "code",
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: "read:recovery read:sleep read:cycles read:workout",
+    scope: "offline read:recovery read:sleep read:cycles read:workout",
     state,   // REQUIRED by WHOOP
   });
 
