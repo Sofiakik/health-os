@@ -262,6 +262,8 @@ export async function GET() {
     }
 
     // Aggregate WHOOP metrics into daily_health_summary for each affected “WHOOP day”.
+    const entriesAggregationCalls: string[] = [];
+    const entriesAggregationErrors: { date: string; error: unknown }[] = [];
     if (metricRows.length > 0) {
       const { data: dateRows, error: dateError } = await supabase
         .from("health_metrics")
@@ -340,11 +342,13 @@ export async function GET() {
                 d,
                 aggEntriesError
               );
+              entriesAggregationErrors.push({ date: d, error: aggEntriesError });
             } else {
               console.log(
                 "[whoop sync] entries aggregation completed for date:",
                 d
               );
+              entriesAggregationCalls.push(d);
             }
           } catch (e) {
             console.error(
@@ -370,6 +374,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
+      debug_force: "THIS_SHOULD_APPEAR",
       cycles: cycleRecords.length,
       recoveries: recoveryRecords.length,
       sleeps: sleepRecords.length,
@@ -377,6 +382,8 @@ export async function GET() {
       whoop_raw_rows: whoopRawRows.length,
       health_metrics_upserted: metricRows.length,
       summary_triggered: summaryTriggered,
+      entries_aggregation_called_for_dates: entriesAggregationCalls,
+      entries_aggregation_errors: entriesAggregationErrors,
     });
   } catch (err: any) {
     return NextResponse.json(
