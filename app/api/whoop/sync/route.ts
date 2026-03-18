@@ -314,15 +314,36 @@ export async function GET() {
 
         for (const d of uniqueDates) {
           try {
-            const { error: aggError } = await supabase.rpc(
+            const { error: aggWhoopError } = await supabase.rpc(
               "upsert_daily_health_summary_whoop",
               { p_user_id: userId, p_date: d }
             );
-            if (aggError) {
+            if (aggWhoopError) {
               console.error(
-                "[whoop sync] daily aggregation failed for date",
+                "[whoop sync] WHOOP daily aggregation failed for date",
                 d,
-                aggError
+                aggWhoopError
+              );
+            }
+
+            console.log(
+              "[whoop sync] calling entries aggregation for date:",
+              d
+            );
+            const { error: aggEntriesError } = await supabase.rpc(
+              "upsert_daily_health_summary_entries",
+              { p_user_id: userId, p_date: d }
+            );
+            if (aggEntriesError) {
+              console.error(
+                "[whoop sync] entries daily aggregation failed for date",
+                d,
+                aggEntriesError
+              );
+            } else {
+              console.log(
+                "[whoop sync] entries aggregation completed for date:",
+                d
               );
             }
           } catch (e) {
