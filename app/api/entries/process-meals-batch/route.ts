@@ -10,6 +10,11 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+function parseBatchLimit(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 50;
+  return raw;
+}
+
 async function getUserIdFromBearer(req: Request): Promise<string> {
   const authHeader = req.headers.get("authorization") ?? "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
@@ -33,16 +38,13 @@ async function getUserIdFromBearer(req: Request): Promise<string> {
 }
 
 export async function POST(req: Request) {
-  return NextResponse.json({
-    debug: "ROUTE_HIT",
-  });
   console.log("BATCH_VERSION_V2_NO_OR_FILTER");
   try {
     const userId = await getUserIdFromBearer(req);
-    const body = (await req.json().catch(() => ({}))) as { limit?: number };
+    const body = (await req.json().catch(() => ({}))) as { limit?: unknown };
 
-    const maxToProcess =
-      typeof body.limit === "number" ? Math.max(1, Math.floor(body.limit)) : 50;
+    const limit = parseBatchLimit(body?.limit);
+    const maxToProcess = Math.max(1, Math.floor(limit));
 
     let processed_count = 0;
     let skipped_count = 0;
