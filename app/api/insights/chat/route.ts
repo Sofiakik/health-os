@@ -53,7 +53,11 @@ export async function POST(req: Request) {
     },
     {
       role: "system",
-      content: `Today's insight: ${JSON.stringify(insight?.insight)}`,
+      content: `Today's insight: ${JSON.stringify({
+        insight_text: insight?.insight_text ?? null,
+        hypothesis: insight?.hypothesis ?? null,
+        confidence: insight?.confidence ?? null,
+      })}`,
     },
     ...(history || []).map((m: any) => ({
       role: m.role,

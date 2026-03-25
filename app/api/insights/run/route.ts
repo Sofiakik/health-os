@@ -133,13 +133,17 @@ export async function POST(req: Request) {
     // 4) Save insight row
     const today = yyyyMmDd(new Date());
 
+    // Write only normalized columns (hypothesis/confidence are not produced by this LLM route yet).
+    // Keep `daily_insights.insight` nullable so we don't depend on the legacy JSON field.
     const { error: insertError } = await supabaseAdmin.from("daily_insights").insert({
       user_id: userId,
-      day: today,
+      date: today,
       window_end_at: new Date().toISOString(),
       provider: "openai",
       model: OPENAI_MODEL,
-      insight: { text: insightText, start_date: startDate, end_date: endDate },
+      insight_text: insightText,
+      hypothesis: null,
+      confidence: null,
     });
 
     if (insertError) {

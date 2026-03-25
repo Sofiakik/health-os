@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { generateDailyInsights } from "@/lib/insights";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -336,6 +337,10 @@ export async function GET() {
               "upsert_daily_health_summary_entries",
               { p_user_id: userId, p_date: d }
             );
+
+            console.log("[insights] generating for date:", d);
+            await generateDailyInsights(userId, d);
+
             if (aggEntriesError) {
               console.error(
                 "[whoop sync] entries daily aggregation failed for date",

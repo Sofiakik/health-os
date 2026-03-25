@@ -33,6 +33,7 @@ async function getUserIdFromBearer(req: Request): Promise<string> {
 }
 
 export async function POST(req: Request) {
+  console.log("BATCH_VERSION_V2_NO_OR_FILTER");
   try {
     const userId = await getUserIdFromBearer(req);
     const body = (await req.json().catch(() => ({}))) as { limit?: number };
@@ -53,17 +54,21 @@ export async function POST(req: Request) {
       .select("*")
       .eq("user_id", userId)
       .eq("note_type", "meal")
-      .or(`
-  nutrition_extracted_at.is.null,
-  nutrition_confidence.is.null,
-  nutrition_confidence.lt.0.6
-`)
-      .order("created_at", { ascending: true })
-      .limit(maxToProcess);
+      .order("created_at", { ascending: true });
 
     if (error) throw error;
 
-    const page = meals ?? [];
+    const allMeals = meals ?? [];
+    const filtered = allMeals.filter(
+      (m) =>
+        m.nutrition_extracted_at === null ||
+        m.nutrition_confidence === null ||
+        m.nutrition_confidence < 0.6
+    );
+
+    console.log("[batch] total:", allMeals.length, "filtered:", filtered.length);
+
+    const page = filtered.slice(0, maxToProcess);
 
     for (const m of page) {
       try {
@@ -86,6 +91,7 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({
+      debug: "BATCH_VERSION_V2_NO_OR_FILTER",
       ok: true,
       processed_count,
       skipped_count,

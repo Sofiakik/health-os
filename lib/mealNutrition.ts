@@ -78,22 +78,14 @@ export async function processMealEntry(params: { entry_id: string; user_id: stri
   }
 
   const systemPrompt = `
-You are a nutrition analysis model.
+You MUST return ONLY valid JSON.
+Do NOT include markdown.
+Do NOT include explanations.
+Do NOT wrap in \`\`\`.
 
-Estimate calories and macronutrients from:
-- image (if provided)
-- text (if provided)
+If you do not follow this, the system will fail.
 
-Rules:
-- Be conservative and realistic
-- Do NOT hallucinate ingredients
-- Use typical portion sizes unless clearly specified
-- If uncertain → lower confidence
-- If highly uncertain → return null values
-- Account for oils/sauces only if likely
-
-Return ONLY valid JSON:
-
+Return exactly:
 {
   "calories_kcal": number | null,
   "protein_g": number | null,
@@ -127,10 +119,16 @@ Return ONLY valid JSON:
 
     console.log("[nutrition] raw LLM response", completion);
 
-    // 1) Parse response safely
+    // 1) Parse response safely (strip any markdown fences just in case)
     let parsed: any;
     try {
-      parsed = JSON.parse(completion.choices[0].message.content || "{}");
+      const raw = completion.choices[0].message.content || "";
+      const cleaned = raw
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
+      console.log("[nutrition] cleaned response", cleaned);
+      parsed = JSON.parse(cleaned);
     } catch (e) {
       console.error("[nutrition] JSON parse failed", e);
       console.warn("[nutrition] SKIPPED", {

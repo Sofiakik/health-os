@@ -35,15 +35,9 @@ type Dialogue = {
 
 type Insight = {
   id: string;
-  insight: {
-    text?: string;
-    start_date?: string;
-    end_date?: string;
-    summary?: string;
-    domains?: Record<string, string>;
-    actions?: string[];
-    confidence?: number;
-  };
+  insight_text: string | null;
+  hypothesis: string | null;
+  confidence: number | null;
 };
 
 type WhoopDay = {
@@ -313,7 +307,7 @@ export default function CalendarPage() {
 
         supabase
           .from("daily_insights")
-          .select("id,insight")
+          .select("id,insight_text,hypothesis,confidence")
           .eq("user_id", uid)
           .eq("date", date)
           .maybeSingle(),
@@ -894,8 +888,8 @@ export default function CalendarPage() {
               whiteSpace: "pre-wrap",
             }}
           >
-            {insight.insight?.text ??
-              insight.insight?.summary ??
+            {insight.insight_text ??
+              insight.hypothesis ??
               "Insight exists but no text field was found."}
           </div>
         )}
