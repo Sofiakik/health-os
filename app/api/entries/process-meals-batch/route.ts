@@ -33,6 +33,9 @@ async function getUserIdFromBearer(req: Request): Promise<string> {
 }
 
 export async function POST(req: Request) {
+  return NextResponse.json({
+    debug: "ROUTE_HIT",
+  });
   console.log("BATCH_VERSION_V2_NO_OR_FILTER");
   try {
     const userId = await getUserIdFromBearer(req);
