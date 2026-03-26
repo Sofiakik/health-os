@@ -26,21 +26,21 @@ export default function DailyInsightCard({
   let content: ReactNode;
 
   if (loading) {
-    content = <p style={{ margin: 0, fontSize: 15, color: "#b0b5be" }}>Loading daily insight...</p>;
+    content = <p style={{ margin: 0, fontSize: 15, color: "#7a9a88" }}>Loading daily insight...</p>;
   } else if (!hasMealsForDate) {
-    content = <p style={{ margin: 0, fontSize: 15, color: "#888c94" }}>No meal+WHOOP insights today</p>;
+    content = <p style={{ margin: 0, fontSize: 15, color: "#8aaa95" }}>No meal+WHOOP insights today</p>;
   } else if (!insight) {
-    content = <p style={{ margin: 0, fontSize: 15, color: "#9da4af" }}>Insight is being generated</p>;
+    content = <p style={{ margin: 0, fontSize: 15, color: "#8aaa95" }}>Insight is being generated</p>;
   } else {
     content = (
       <div style={{ display: "grid", gap: 14 }}>
-        <div style={{ fontSize: 16, fontWeight: 600, color: "#f0f0f0", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: "#1d3827", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
           {insight.insight_text ?? "No insight text available."}
         </div>
-        <div style={{ fontSize: 14, color: "#9ca3af", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: 14, color: "#5a7a65", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
           {insight.hypothesis ?? "No hypothesis available."}
         </div>
-        <div style={{ fontSize: 12, color: "#6b7280" }}>
+        <div style={{ fontSize: 12, color: "#8aaa95" }}>
           Confidence: {formatConfidence(insight.confidence)}
         </div>
       </div>
@@ -49,13 +49,13 @@ export default function DailyInsightCard({
 
   return (
     <section style={{ marginTop: 24 }}>
-      <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 600, letterSpacing: "-0.3px", color: "#e5e7eb" }}>Daily insight</h3>
+      <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 600, letterSpacing: "-0.3px", color: "#1d3827" }}>Daily insight</h3>
       <div
         style={{
-          border: "1px solid rgba(255,255,255,0.09)",
+          border: "1px solid rgba(72, 128, 88, 0.2)",
           borderRadius: 12,
           padding: 18,
-          background: "#232325",
+          background: "#ffffff",
         }}
       >
         {content}

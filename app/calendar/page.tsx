@@ -570,7 +570,7 @@ export default function CalendarPage() {
 
   const hasMealsForSelectedDate = entries.some((entry) => entry.note_type === "meal");
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", padding: 24, backgroundColor: "#111113", minHeight: "100vh" }}>
+    <div style={{ maxWidth: 760, margin: "0 auto", padding: 24, backgroundColor: "#f4f8f3", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h2 style={{ margin: 0 }}>Calendar</h2>
         <button onClick={signOut} style={{ marginLeft: "auto" }}>
@@ -597,10 +597,10 @@ export default function CalendarPage() {
               <div
                 key={`${msg.role}-${index}`}
                 style={{
-                  border: "1px solid #ddd",
+                  border: "1px solid rgba(72, 128, 88, 0.18)",
                   borderRadius: 10,
                   padding: 12,
-                  background: msg.role === "user" ? "#f8f8f8" : "#ffffff",
+                  background: msg.role === "user" ? "#edf5ea" : "#ffffff",
                 }}
               >
                 <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
@@ -736,7 +736,7 @@ export default function CalendarPage() {
               <div
                 key={entry.id}
                 style={{
-                  border: "1px solid #ddd",
+                  border: "1px solid rgba(72, 128, 88, 0.18)",
                   borderRadius: 10,
                   padding: 14,
                   display: "grid",
