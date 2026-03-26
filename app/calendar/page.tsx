@@ -228,9 +228,6 @@ export default function CalendarPage() {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [dialogue, setDialogue] = useState<Dialogue[]>([]);
   const [whoop, setWhoop] = useState<WhoopDay | null>(null);
-  const [todayInsight, setTodayInsight] = useState<Insight | null>(null);
-  const [hasMealsToday, setHasMealsToday] = useState<boolean>(false);
-  const [todayInsightLoading, setTodayInsightLoading] = useState<boolean>(true);
 
   const [mealType, setMealType] = useState<MealType>("breakfast");
   const [note, setNote] = useState<string>("");
@@ -406,51 +403,9 @@ export default function CalendarPage() {
     }
   };
 
-  const loadTodayInsightSurface = async (uid: string) => {
-    setTodayInsightLoading(true);
-
-    try {
-      const today = todayLocal();
-      const [todayInsightRes, todayMealsRes] = await Promise.all([
-        supabase
-          .from("daily_insights")
-          .select("id,insight_text,hypothesis,confidence")
-          .eq("user_id", uid)
-          .eq("date", today)
-          .order("id", { ascending: false })
-          .limit(1),
-        supabase
-          .from("entries")
-          .select("id")
-          .eq("user_id", uid)
-          .eq("date", today)
-          .eq("note_type", "meal")
-          .limit(1),
-      ]);
-
-      if (todayInsightRes.error) throw todayInsightRes.error;
-      if (todayMealsRes.error) throw todayMealsRes.error;
-
-      const latest = (todayInsightRes.data?.[0] as Insight | undefined) ?? null;
-      setTodayInsight(latest);
-      setHasMealsToday((todayMealsRes.data?.length ?? 0) > 0);
-    } catch (err) {
-      console.error("loadTodayInsightSurface failed", err);
-      setTodayInsight(null);
-      setHasMealsToday(false);
-    } finally {
-      setTodayInsightLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (!userId) return;
     void loadDayData(userId, selectedDate);
-  }, [userId, selectedDate]);
-
-  useEffect(() => {
-    if (!userId) return;
-    void loadTodayInsightSurface(userId);
   }, [userId, selectedDate]);
 
   const uploadImage = async (
@@ -522,7 +477,6 @@ export default function CalendarPage() {
       setEventTimeInput(localDateTimeInputValue(selectedDate));
 
       await loadDayData(userId, selectedDate);
-      await loadTodayInsightSurface(userId);
     } catch (err) {
       console.error("saveEntry failed", err);
 
@@ -614,8 +568,9 @@ export default function CalendarPage() {
     setFile(nextFile);
   };
 
+  const hasMealsForSelectedDate = entries.some((entry) => entry.note_type === "meal");
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", padding: 24 }}>
+    <div style={{ maxWidth: 760, margin: "0 auto", padding: 24, backgroundColor: "#111113", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <h2 style={{ margin: 0 }}>Calendar</h2>
         <button onClick={signOut} style={{ marginLeft: "auto" }}>
@@ -625,11 +580,56 @@ export default function CalendarPage() {
 
       <div style={{ marginTop: 16 }}>
         <DailyInsightCard
-          loading={todayInsightLoading}
-          hasMealsToday={hasMealsToday}
-          insight={todayInsight}
+          loading={loading}
+          hasMealsForDate={hasMealsForSelectedDate}
+          insight={insight}
         />
       </div>
+
+      <section style={{ marginTop: 24 }}>
+        <h3>Insight chat</h3>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          {dialogue.length === 0 ? (
+            <p>No messages yet</p>
+          ) : (
+            dialogue.map((msg, index) => (
+              <div
+                key={`${msg.role}-${index}`}
+                style={{
+                  border: "1px solid #ddd",
+                  borderRadius: 10,
+                  padding: 12,
+                  background: msg.role === "user" ? "#f8f8f8" : "#ffffff",
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
+                  {msg.role}
+                </div>
+                <div style={{ whiteSpace: "pre-wrap" }}>{msg.message}</div>
+              </div>
+            ))
+          )}
+
+          <div style={{ display: "grid", gap: 8 }}>
+            <textarea
+              rows={3}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              placeholder="Ask about today's insight"
+              style={{ width: "100%" }}
+            />
+            <div>
+              <button
+                onClick={sendQuestion}
+                disabled={!insight || chatLoading || !question.trim()}
+              >
+                {chatLoading ? "Sending..." : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div style={{ marginTop: 16 }}>
         <input
@@ -815,71 +815,7 @@ export default function CalendarPage() {
         )}
       </section>
 
-      <section style={{ marginTop: 32 }}>
-        <h3>Insight</h3>
-
-        {!insight ? (
-          <p>No insight for this day</p>
-        ) : (
-          <div
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 10,
-              padding: 14,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {insight.insight_text ??
-              insight.hypothesis ??
-              "Insight exists but no text field was found."}
-          </div>
-        )}
-      </section>
-
-      <section style={{ marginTop: 32, marginBottom: 48 }}>
-        <h3>Insight chat</h3>
-
-        <div style={{ display: "grid", gap: 12 }}>
-          {dialogue.length === 0 ? (
-            <p>No messages yet</p>
-          ) : (
-            dialogue.map((msg, index) => (
-              <div
-                key={`${msg.role}-${index}`}
-                style={{
-                  border: "1px solid #ddd",
-                  borderRadius: 10,
-                  padding: 12,
-                  background: msg.role === "user" ? "#f8f8f8" : "#ffffff",
-                }}
-              >
-                <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>
-                  {msg.role}
-                </div>
-                <div style={{ whiteSpace: "pre-wrap" }}>{msg.message}</div>
-              </div>
-            ))
-          )}
-
-          <div style={{ display: "grid", gap: 8 }}>
-            <textarea
-              rows={3}
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Ask about today's insight"
-              style={{ width: "100%" }}
-            />
-            <div>
-              <button
-                onClick={sendQuestion}
-                disabled={!insight || chatLoading || !question.trim()}
-              >
-                {chatLoading ? "Sending..." : "Send"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <div style={{ marginBottom: 48 }} />
     </div>
   );
 }

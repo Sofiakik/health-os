@@ -135,16 +135,21 @@ export async function POST(req: Request) {
 
     // Write only normalized columns (hypothesis/confidence are not produced by this LLM route yet).
     // Keep `daily_insights.insight` nullable so we don't depend on the legacy JSON field.
-    const { error: insertError } = await supabaseAdmin.from("daily_insights").insert({
-      user_id: userId,
-      date: today,
-      window_end_at: new Date().toISOString(),
-      provider: "openai",
-      model: OPENAI_MODEL,
-      insight_text: insightText,
-      hypothesis: null,
-      confidence: null,
-    });
+    const { error: insertError } = await supabaseAdmin
+      .from("daily_insights")
+      .upsert(
+        {
+          user_id: userId,
+          date: today,
+          window_end_at: new Date().toISOString(),
+          provider: "openai",
+          model: OPENAI_MODEL,
+          insight_text: insightText,
+          hypothesis: null,
+          confidence: null,
+        },
+        { onConflict: "user_id,date" }
+      );
 
     if (insertError) {
       return Response.json({ error: insertError.message }, { status: 500 });
