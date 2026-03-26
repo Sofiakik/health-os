@@ -242,13 +242,10 @@ export default function CalendarPage() {
   const [pageError, setPageError] = useState<string | null>(null);
 
   const [mealBatchLoading, setMealBatchLoading] = useState<boolean>(false);
-  const [mealBatchResult, setMealBatchResult] = useState<{
-    processed_count: number;
-    skipped_count: number;
-    errors?: unknown;
-    ok?: boolean;
-    results?: Array<{ entry_id: string; status: string; reason?: string }>;
-  } | null>(null);
+  const [mealBatchResult, setMealBatchResult] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [mealBatchError, setMealBatchError] = useState<string | null>(null);
   const [mealBatchAutoRan, setMealBatchAutoRan] = useState<boolean>(false);
 
@@ -421,6 +418,7 @@ export default function CalendarPage() {
   }, [userId, selectedDate]);
 
   const processMealsBatch = async () => {
+    console.log("PROCESS MEALS CLICKED");
     setMealBatchLoading(true);
     setMealBatchError(null);
     setMealBatchResult(null);
@@ -439,20 +437,21 @@ export default function CalendarPage() {
         body: JSON.stringify({}),
       });
 
-      const json = await res.json().catch(() => ({}));
+      const result = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
-        throw new Error(json?.error ?? `Request failed with ${res.status}`);
+        throw new Error(
+          (typeof result?.error === "string" ? result.error : null) ??
+            `Request failed with ${res.status}`
+        );
       }
 
-      setMealBatchResult({
-        processed_count: json.processed_count ?? 0,
-        skipped_count: json.skipped_count ?? 0,
-        errors: json.errors ?? json.error ?? null,
-        ok: json.ok,
-        results: json.results ?? [],
-      });
-    } catch (e: any) {
-      setMealBatchError(e?.message ?? "Meal batch processing failed");
+      console.log("batch result", result);
+      setMealBatchResult(result);
+    } catch (err: unknown) {
+      console.error("batch error", err);
+      setMealBatchError(
+        err instanceof Error ? err.message : "Meal batch processing failed"
+      );
     } finally {
       setMealBatchLoading(false);
     }
@@ -783,30 +782,41 @@ export default function CalendarPage() {
             disabled={mealBatchLoading}
             style={{ opacity: mealBatchLoading ? 0.7 : 1 }}
           >
-            {mealBatchLoading ? "Processing meals..." : "Process meal nutrition (LLM)"}
+            {mealBatchLoading ? "Processing..." : "Process meal nutrition (LLM)"}
           </button>
           <span style={{ fontSize: 12, opacity: 0.7 }}>
             Runs on meals with missing/low-confidence nutrition.
           </span>
         </div>
 
+        {mealBatchLoading ? (
+          <div style={{ marginTop: 10, fontSize: 14, fontWeight: 500 }}>Processing...</div>
+        ) : null}
+
         {mealBatchError ? (
           <div style={{ marginTop: 10, color: "#b00020" }}>Meal batch error: {mealBatchError}</div>
         ) : null}
 
         {mealBatchResult ? (
-          <div style={{ marginTop: 10, fontSize: 13, opacity: 0.9 }}>
-            Meal batch result: processed_count={mealBatchResult.processed_count}, skipped_count=
-            {mealBatchResult.skipped_count}
-
-            {mealBatchResult.results && mealBatchResult.results.length > 0 ? (
-              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
-                Results (first {Math.min(10, mealBatchResult.results.length)}):
-                <pre style={{ margin: "8px 0 0 0", whiteSpace: "pre-wrap" }}>
-                  {JSON.stringify(mealBatchResult.results.slice(0, 10), null, 2)}
-                </pre>
-              </div>
-            ) : null}
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Batch response (JSON)</div>
+            <pre
+              style={{
+                margin: 0,
+                padding: 12,
+                fontSize: 12,
+                lineHeight: 1.45,
+                background: "#f6f6f6",
+                border: "1px solid #e0e0e0",
+                borderRadius: 8,
+                overflow: "auto",
+                maxHeight: 360,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {JSON.stringify(mealBatchResult, null, 2)}
+            </pre>
           </div>
         ) : null}
 

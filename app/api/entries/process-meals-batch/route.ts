@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { generateDailyInsights } from "@/lib/insights";
 import { processMealEntry } from "@/lib/mealNutrition";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,20 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 function parseBatchLimit(raw: unknown): number {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return 50;
   return raw;
+}
+
+function entryCalendarDate(m: {
+  date?: string | null;
+  event_time?: string | null;
+}): string | null {
+  if (typeof m.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(m.date)) {
+    return m.date;
+  }
+  if (m.event_time) {
+    const t = new Date(m.event_time);
+    if (!Number.isNaN(t.getTime())) return t.toISOString().slice(0, 10);
+  }
+  return null;
 }
 
 async function getUserIdFromBearer(req: Request): Promise<string> {
@@ -92,6 +107,30 @@ export async function POST(req: Request) {
           status: "skipped",
           reason: e?.message ?? "exception",
         });
+      }
+    }
+
+    const affectedDates = new Set<string>();
+    for (let i = 0; i < page.length; i++) {
+      if (results[i]?.status !== "processed") continue;
+      const d = entryCalendarDate(page[i] as { date?: string | null; event_time?: string | null });
+      if (d) affectedDates.add(d);
+    }
+
+    const datesSorted = Array.from(affectedDates).sort();
+    for (const date of datesSorted) {
+      try {
+        const { error: aggErr } = await supabaseAdmin.rpc(
+          "upsert_daily_health_summary_entries",
+          { p_user_id: userId, p_date: date }
+        );
+        if (aggErr) {
+          console.error("[batch] upsert_daily_health_summary_entries failed", date, aggErr);
+        }
+        await generateDailyInsights(userId, date);
+        console.log("[batch] insights regenerated for", date);
+      } catch (e) {
+        console.error("[batch] aggregation/insights failed for date", date, e);
       }
     }
 
