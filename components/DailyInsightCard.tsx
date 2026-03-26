@@ -1,4 +1,5 @@
 "use client";
+import { ReactNode } from "react";
 
 type InsightCardData = {
   insight_text: string | null;
@@ -22,7 +23,7 @@ export default function DailyInsightCard({
   hasMealsToday,
   insight,
 }: DailyInsightCardProps) {
-  let content: JSX.Element;
+  let content: ReactNode;
 
   if (loading) {
     content = <p style={{ margin: 0 }}>Loading daily insight...</p>;
