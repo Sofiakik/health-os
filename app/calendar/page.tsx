@@ -3,8 +3,8 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import DailyInsightCard from "@/components/DailyInsightCard";
 
-type NoteType = "meal" | "symptom" | "state";
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 type EntryRow = {
@@ -13,7 +13,7 @@ type EntryRow = {
   date: string;
   event_time: string | null;
   note: string | null;
-  note_type: NoteType;
+  note_type: "meal";
   meal_type: string | null;
   image_path: string | null;
   image_url?: string | null; // legacy fallback only
@@ -228,8 +228,10 @@ export default function CalendarPage() {
   const [insight, setInsight] = useState<Insight | null>(null);
   const [dialogue, setDialogue] = useState<Dialogue[]>([]);
   const [whoop, setWhoop] = useState<WhoopDay | null>(null);
+  const [todayInsight, setTodayInsight] = useState<Insight | null>(null);
+  const [hasMealsToday, setHasMealsToday] = useState<boolean>(false);
+  const [todayInsightLoading, setTodayInsightLoading] = useState<boolean>(true);
 
-  const [noteType, setNoteType] = useState<NoteType>("meal");
   const [mealType, setMealType] = useState<MealType>("breakfast");
   const [note, setNote] = useState<string>("");
   const [eventTimeInput, setEventTimeInput] = useState<string>(localDateTimeInputValue(todayLocal()));
@@ -240,14 +242,6 @@ export default function CalendarPage() {
   const [chatLoading, setChatLoading] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [pageError, setPageError] = useState<string | null>(null);
-
-  const [mealBatchLoading, setMealBatchLoading] = useState<boolean>(false);
-  const [mealBatchResult, setMealBatchResult] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
-  const [mealBatchError, setMealBatchError] = useState<string | null>(null);
-  const [mealBatchAutoRan, setMealBatchAutoRan] = useState<boolean>(false);
 
   const fileLabel = useMemo(() => file?.name ?? "No file selected", [file]);
 
@@ -412,64 +406,52 @@ export default function CalendarPage() {
     }
   };
 
+  const loadTodayInsightSurface = async (uid: string) => {
+    setTodayInsightLoading(true);
+
+    try {
+      const today = todayLocal();
+      const [todayInsightRes, todayMealsRes] = await Promise.all([
+        supabase
+          .from("daily_insights")
+          .select("id,insight_text,hypothesis,confidence")
+          .eq("user_id", uid)
+          .eq("date", today)
+          .order("id", { ascending: false })
+          .limit(1),
+        supabase
+          .from("entries")
+          .select("id")
+          .eq("user_id", uid)
+          .eq("date", today)
+          .eq("note_type", "meal")
+          .limit(1),
+      ]);
+
+      if (todayInsightRes.error) throw todayInsightRes.error;
+      if (todayMealsRes.error) throw todayMealsRes.error;
+
+      const latest = (todayInsightRes.data?.[0] as Insight | undefined) ?? null;
+      setTodayInsight(latest);
+      setHasMealsToday((todayMealsRes.data?.length ?? 0) > 0);
+    } catch (err) {
+      console.error("loadTodayInsightSurface failed", err);
+      setTodayInsight(null);
+      setHasMealsToday(false);
+    } finally {
+      setTodayInsightLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!userId) return;
     void loadDayData(userId, selectedDate);
   }, [userId, selectedDate]);
 
-  const processMealsBatch = async () => {
-    console.log("PROCESS MEALS CLICKED");
-    setMealBatchLoading(true);
-    setMealBatchError(null);
-    setMealBatchResult(null);
-
-    try {
-      const { data } = await supabase.auth.getSession();
-      const accessToken = data.session?.access_token;
-      if (!accessToken) throw new Error("No active Supabase session");
-
-      const res = await fetch("/api/entries/process-meals-batch", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({}),
-      });
-
-      const result = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok) {
-        throw new Error(
-          (typeof result?.error === "string" ? result.error : null) ??
-            `Request failed with ${res.status}`
-        );
-      }
-
-      console.log("batch result", result);
-      setMealBatchResult(result);
-    } catch (err: unknown) {
-      console.error("batch error", err);
-      setMealBatchError(
-        err instanceof Error ? err.message : "Meal batch processing failed"
-      );
-    } finally {
-      setMealBatchLoading(false);
-    }
-  };
-
-  // Optional debug trigger:
-  // - open /calendar?processMealsBatch=1 to run once for the current session
   useEffect(() => {
     if (!userId) return;
-    if (mealBatchAutoRan) return;
-
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("processMealsBatch") !== "1") return;
-
-    setMealBatchAutoRan(true);
-    void processMealsBatch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, mealBatchAutoRan]);
+    void loadTodayInsightSurface(userId);
+  }, [userId, selectedDate]);
 
   const uploadImage = async (
     uid: string,
@@ -520,8 +502,8 @@ export default function CalendarPage() {
         date: selectedDate,
         event_time: eventTime,
         note: note.trim() || null,
-        note_type: noteType,
-        meal_type: noteType === "meal" ? mealType : null,
+        note_type: "meal" as const,
+        meal_type: mealType,
         image_path: imagePath,
         image_url: null, // legacy column intentionally not used for new writes
         portion_grams: null,
@@ -540,6 +522,7 @@ export default function CalendarPage() {
       setEventTimeInput(localDateTimeInputValue(selectedDate));
 
       await loadDayData(userId, selectedDate);
+      await loadTodayInsightSurface(userId);
     } catch (err) {
       console.error("saveEntry failed", err);
 
@@ -641,6 +624,14 @@ export default function CalendarPage() {
       </div>
 
       <div style={{ marginTop: 16 }}>
+        <DailyInsightCard
+          loading={todayInsightLoading}
+          hasMealsToday={hasMealsToday}
+          insight={todayInsight}
+        />
+      </div>
+
+      <div style={{ marginTop: 16 }}>
         <input
           type="date"
           value={selectedDate}
@@ -662,65 +653,24 @@ export default function CalendarPage() {
         </div>
       ) : null}
 
-      <section style={{ marginTop: 24 }}>
-        <h3>WHOOP</h3>
-
-        {loading ? (
-          <p>Loading...</p>
-        ) : !whoop ? (
-          <p>No WHOOP data</p>
-        ) : (
-          <div style={{ display: "grid", gap: 8 }}>
-            <div>Sleep: {formatSleepHours(whoop.sleep_duration)}</div>
-            <div>Recovery: {formatNumber(whoop.recovery_score)}</div>
-            <div>HRV: {formatNumber(whoop.hrv, 1)}</div>
-            <div>Resting HR: {formatNumber(whoop.resting_hr)}</div>
-            <div>Strain: {formatNumber(whoop.strain, 1)}</div>
-            <div>Respiratory rate: {formatNumber(whoop.respiratory_rate, 1)}</div>
-            <div>Skin temperature: {formatNumber(whoop.skin_temperature, 2)}</div>
-            <div>Blood oxygen: {formatNumber(whoop.blood_oxygen, 1)}</div>
-            <div>Deep sleep: {formatSleepHours(whoop.deep_sleep_duration)}</div>
-            <div>REM sleep: {formatSleepHours(whoop.rem_sleep_duration)}</div>
-            <div>Sleep efficiency: {formatNumber(whoop.sleep_efficiency, 1)}</div>
-            <div>Active calories: {formatNumber(whoop.active_calories)}</div>
-          </div>
-        )}
-      </section>
-
       <section style={{ marginTop: 32 }}>
         <h3>Add entry</h3>
 
         <div style={{ display: "grid", gap: 12 }}>
           <label>
-            Type
+            Meal type
             <div style={{ marginTop: 4 }}>
               <select
-                value={noteType}
-                onChange={(e) => setNoteType(e.target.value as NoteType)}
+                value={mealType}
+                onChange={(e) => setMealType(e.target.value as MealType)}
               >
-                <option value="meal">Meal</option>
-                <option value="symptom">Symptom</option>
-                <option value="state">State</option>
+                <option value="breakfast">Breakfast</option>
+                <option value="lunch">Lunch</option>
+                <option value="dinner">Dinner</option>
+                <option value="snack">Snack</option>
               </select>
             </div>
           </label>
-
-          {noteType === "meal" ? (
-            <label>
-              Meal type
-              <div style={{ marginTop: 4 }}>
-                <select
-                  value={mealType}
-                  onChange={(e) => setMealType(e.target.value as MealType)}
-                >
-                  <option value="breakfast">Breakfast</option>
-                  <option value="lunch">Lunch</option>
-                  <option value="dinner">Dinner</option>
-                  <option value="snack">Snack</option>
-                </select>
-              </div>
-            </label>
-          ) : null}
 
           <label>
             Event time
@@ -775,50 +725,6 @@ export default function CalendarPage() {
 
       <section style={{ marginTop: 32 }}>
         <h3>Entries</h3>
-
-        <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
-          <button
-            onClick={() => void processMealsBatch()}
-            disabled={mealBatchLoading}
-            style={{ opacity: mealBatchLoading ? 0.7 : 1 }}
-          >
-            {mealBatchLoading ? "Processing..." : "Process meal nutrition (LLM)"}
-          </button>
-          <span style={{ fontSize: 12, opacity: 0.7 }}>
-            Runs on meals with missing/low-confidence nutrition.
-          </span>
-        </div>
-
-        {mealBatchLoading ? (
-          <div style={{ marginTop: 10, fontSize: 14, fontWeight: 500 }}>Processing...</div>
-        ) : null}
-
-        {mealBatchError ? (
-          <div style={{ marginTop: 10, color: "#b00020" }}>Meal batch error: {mealBatchError}</div>
-        ) : null}
-
-        {mealBatchResult ? (
-          <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>Batch response (JSON)</div>
-            <pre
-              style={{
-                margin: 0,
-                padding: 12,
-                fontSize: 12,
-                lineHeight: 1.45,
-                background: "#f6f6f6",
-                border: "1px solid #e0e0e0",
-                borderRadius: 8,
-                overflow: "auto",
-                maxHeight: 360,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-              }}
-            >
-              {JSON.stringify(mealBatchResult, null, 2)}
-            </pre>
-          </div>
-        ) : null}
 
         {loading ? (
           <p>Loading...</p>
@@ -880,6 +786,31 @@ export default function CalendarPage() {
                 ) : null}
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginTop: 32 }}>
+        <h3>WHOOP</h3>
+
+        {loading ? (
+          <p>Loading...</p>
+        ) : !whoop ? (
+          <p>No WHOOP data</p>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            <div>Sleep: {formatSleepHours(whoop.sleep_duration)}</div>
+            <div>Recovery: {formatNumber(whoop.recovery_score)}</div>
+            <div>HRV: {formatNumber(whoop.hrv, 1)}</div>
+            <div>Resting HR: {formatNumber(whoop.resting_hr)}</div>
+            <div>Strain: {formatNumber(whoop.strain, 1)}</div>
+            <div>Respiratory rate: {formatNumber(whoop.respiratory_rate, 1)}</div>
+            <div>Skin temperature: {formatNumber(whoop.skin_temperature, 2)}</div>
+            <div>Blood oxygen: {formatNumber(whoop.blood_oxygen, 1)}</div>
+            <div>Deep sleep: {formatSleepHours(whoop.deep_sleep_duration)}</div>
+            <div>REM sleep: {formatSleepHours(whoop.rem_sleep_duration)}</div>
+            <div>Sleep efficiency: {formatNumber(whoop.sleep_efficiency, 1)}</div>
+            <div>Active calories: {formatNumber(whoop.active_calories)}</div>
           </div>
         )}
       </section>
