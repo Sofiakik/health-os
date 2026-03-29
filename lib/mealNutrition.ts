@@ -97,40 +97,57 @@ Return exactly:
 `;
 
   const userText = [
+    `Analyze this meal and return JSON with:
+• calories_kcal
+• protein_g
+• carbs_g
+• fat_g`,
+    "",
+    systemPrompt.trim(),
+    "",
     "USER INPUT:",
     `- note: ${entry.note ? String(entry.note) : "(none)"}`,
     `- image: ${signedUrl ? "(provided)" : "(not provided)"}`,
   ].join("\n");
 
   try {
-    const content: any[] = [{ type: "text", text: userText }];
+    const userContent: Array<
+      | { type: "input_text"; text: string }
+      | { type: "input_image"; detail: "auto"; image_url: string }
+    > = [{ type: "input_text", text: userText }];
+
     if (signedUrl) {
-      content.push({ type: "image_url", image_url: { url: signedUrl } });
+      userContent.push({
+        type: "input_image",
+        detail: "auto",
+        image_url: signedUrl,
+      });
     }
 
-    const completion = await openai.chat.completions.create({
+    const response = await openai.responses.create({
       model: OPENAI_MODEL,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content },
+      input: [
+        {
+          role: "user",
+          content: userContent,
+        },
       ],
+      text: { format: { type: "json_object" } },
     });
 
-    console.log("[nutrition] raw LLM response", completion);
+    const outputText = response.output_text;
+    console.log("[nutrition] raw response:", outputText);
 
     // 1) Parse response safely (strip any markdown fences just in case)
     let parsed: any;
     try {
-      const raw = completion.choices[0].message.content || "";
-      const cleaned = raw
+      const cleaned = outputText
         .replace(/```json/g, "")
         .replace(/```/g, "")
         .trim();
-      console.log("[nutrition] cleaned response", cleaned);
       parsed = JSON.parse(cleaned);
     } catch (e) {
-      console.error("[nutrition] JSON parse failed", e);
+      console.error("[nutrition] JSON parse failed:", outputText);
       console.warn("[nutrition] SKIPPED", {
         entry_id,
         reason: "json_parse_failed",
