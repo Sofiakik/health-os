@@ -29,8 +29,6 @@ function coerceNullableNumber(v: unknown): number | null {
 export async function processMealEntry(params: { entry_id: string; user_id: string }) {
   const { entry_id, user_id } = params;
 
-  console.log("[nutrition] START", { entry_id });
-
   // Use service role to bypass RLS; still verify ownership to prevent cross-user processing.
   const { data: entry, error: entryError } = await supabaseAdmin
     .from("entries")
@@ -40,7 +38,10 @@ export async function processMealEntry(params: { entry_id: string; user_id: stri
     .maybeSingle();
 
   if (entryError) throw entryError;
-  if (!entry) return { skipped: true, reason: "not_found_or_not_owned" as const };
+  if (!entry) {
+    console.warn("[nutrition] SKIPPED:", "not_found_or_not_owned");
+    return { skipped: true, reason: "not_found_or_not_owned" as const };
+  }
 
   // Idempotency:
   // - If already extracted with high confidence, skip.
@@ -54,9 +55,12 @@ export async function processMealEntry(params: { entry_id: string; user_id: stri
           : Number(entry.nutrition_confidence);
 
     if (c != null && Number.isFinite(c) && c >= 0.6) {
+      console.warn("[nutrition] SKIPPED:", "already_extracted_high_confidence");
       return { skipped: true, reason: "already_extracted_high_confidence" as const };
     }
   }
+
+  console.log("[nutrition] START processing entry:", entry.id);
 
   const signedUrl = entry.image_path
     ? await (async () => {
@@ -124,6 +128,8 @@ Return exactly:
       });
     }
 
+    console.log("[nutrition] calling OpenAI for entry:", entry.id);
+
     const response = await openai.responses.create({
       model: OPENAI_MODEL,
       input: [
@@ -134,6 +140,8 @@ Return exactly:
       ],
       text: { format: { type: "json_object" } },
     });
+
+    console.log("[nutrition] OpenAI response received");
 
     const outputText = response.output_text;
     console.log("[nutrition] raw response:", outputText);
@@ -147,7 +155,9 @@ Return exactly:
         .trim();
       parsed = JSON.parse(cleaned);
     } catch (e) {
+      console.error("[nutrition] ERROR:", e);
       console.error("[nutrition] JSON parse failed:", outputText);
+      console.warn("[nutrition] SKIPPED:", "json_parse_failed");
       console.warn("[nutrition] SKIPPED", {
         entry_id,
         reason: "json_parse_failed",
@@ -169,6 +179,7 @@ Return exactly:
 
     if (!isValid) {
       console.error("[nutrition] invalid structure", parsed);
+      console.warn("[nutrition] SKIPPED:", "invalid_structure");
       console.warn("[nutrition] SKIPPED", {
         entry_id,
         reason: "invalid_structure",
@@ -227,6 +238,7 @@ Return exactly:
 
     if (!isMeaningful) {
       console.warn("[nutrition] empty result, skipping write", { entry_id });
+      console.warn("[nutrition] SKIPPED:", "empty_result");
       console.warn("[nutrition] SKIPPED", {
         entry_id,
         reason: "empty_result",
@@ -234,6 +246,8 @@ Return exactly:
       });
       return { skipped: true, reason: "empty_result" as const };
     }
+
+    console.log("[nutrition] writing nutrition to DB:", parsed);
 
     // 4) Update DB ONLY if parsing succeeded
     const { error: updateError } = await supabaseAdmin
@@ -252,6 +266,8 @@ Return exactly:
 
     if (updateError) throw updateError;
 
+    console.log("[nutrition] SUCCESS write:", entry.id);
+
     console.log("[nutrition] saved to DB", {
       entry_id,
       calories_kcal: result.calories_kcal,
@@ -266,7 +282,8 @@ Return exactly:
     return { skipped: false, result };
   } catch (e: any) {
     // Network / OpenAI failure: do NOT mark extracted to allow retry.
-    console.error("[nutrition] processing failed", e);
+    console.error("[nutrition] ERROR:", e);
+    console.warn("[nutrition] SKIPPED:", "openai_or_runtime_error");
     return { skipped: true, reason: "openai_or_runtime_error" as const };
   }
 }

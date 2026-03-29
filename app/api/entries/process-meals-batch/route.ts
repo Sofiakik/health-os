@@ -101,6 +101,7 @@ export async function POST(req: Request) {
           results.push({ entry_id: m.id, status: "processed" });
         }
       } catch (e: any) {
+        console.error("[nutrition] ERROR:", e);
         skipped_count += 1;
         results.push({
           entry_id: m.id,
@@ -144,6 +145,7 @@ export async function POST(req: Request) {
       results,
     });
   } catch (e: any) {
+    console.error("[nutrition] ERROR:", e);
     return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
   }
 }

@@ -75,6 +75,7 @@ export async function GET(req: Request) {
           });
         }
       } catch (err: any) {
+        console.error("[nutrition] ERROR:", err);
         skipped_count++;
         results.push({
           entry_id: e.id,
@@ -112,6 +113,7 @@ export async function GET(req: Request) {
       updated,
     });
   } catch (e: any) {
+    console.error("[nutrition] ERROR:", e);
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }

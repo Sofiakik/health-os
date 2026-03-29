@@ -50,6 +50,7 @@ export async function POST(req: Request) {
       ...result,
     });
   } catch (e: any) {
+    console.error("[nutrition] ERROR:", e);
     return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
   }
 }
