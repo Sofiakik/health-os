@@ -23,11 +23,11 @@ export async function GET() {
     let processed = 0;
 
     for (const entry of entries ?? []) {
-      await processMealEntry({
+      const result = await processMealEntry({
         entry_id: entry.id,
         user_id: entry.user_id,
       });
-      processed++;
+      if (!result.skipped) processed++;
     }
 
     return NextResponse.json({ processed });

@@ -74,21 +74,25 @@ export async function POST(req: Request) {
       .select("*")
       .eq("user_id", userId)
       .eq("note_type", "meal")
-      .order("created_at", { ascending: true });
+      .is("nutrition_extracted_at", null)
+      .order("created_at", { ascending: true })
+      .limit(maxToProcess);
 
-    if (error) throw error;
+    if (error) {
+      console.error("[batch] query error:", error);
+      return NextResponse.json({
+        ok: false,
+        error: error.message,
+        processed_count: 0,
+        skipped_count: 0,
+        found_count: 0,
+        results: [],
+      });
+    }
 
-    const allMeals = meals ?? [];
-    const filtered = allMeals.filter(
-      (m) =>
-        m.nutrition_extracted_at === null ||
-        m.nutrition_confidence === null ||
-        m.nutrition_confidence < 0.6
-    );
+    const page = meals ?? [];
 
-    console.log("[batch] total:", allMeals.length, "filtered:", filtered.length);
-
-    const page = filtered.slice(0, maxToProcess);
+    console.log("[batch] meals needing extraction:", page.length);
 
     for (const m of page) {
       try {

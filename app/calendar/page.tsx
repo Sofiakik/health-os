@@ -435,6 +435,37 @@ export default function CalendarPage() {
     };
   };
 
+  function triggerNutritionExtractionAfterInsert(entryId: string) {
+    void (async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (!accessToken) return;
+
+        console.log("[nutrition] AUTO TRIGGER START:", entryId);
+        try {
+          const res = await fetch("/api/entries/process-meal", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ entry_id: entryId }),
+          });
+
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            console.error("[nutrition] auto-processing failed:", text || res.status);
+          }
+        } finally {
+          console.log("[nutrition] AUTO TRIGGER END:", entryId);
+        }
+      } catch (e) {
+        console.error("[nutrition] auto-processing failed:", e);
+      }
+    })();
+  }
+
   const saveEntry = async () => {
     if (!userId) return;
     if (!note.trim() && !file) return;
@@ -466,10 +497,18 @@ export default function CalendarPage() {
         calories_source: null,
       };
 
-      const { error } = await supabase.from("entries").insert(payload);
+      const { data: inserted, error } = await supabase
+        .from("entries")
+        .insert(payload)
+        .select("id")
+        .single();
 
       if (error) {
         throw error;
+      }
+
+      if (inserted?.id) {
+        triggerNutritionExtractionAfterInsert(inserted.id);
       }
 
       setNote("");
